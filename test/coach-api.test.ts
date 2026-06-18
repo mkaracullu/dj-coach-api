@@ -55,7 +55,7 @@ describe("DJ Lingo Coach API", () => {
     const body = await response.json();
     expect(body).toMatchObject({
       ok: true,
-      service: "dj-lingo-coach-api",
+      service: "dj-coach-api",
       contractVersion: 1,
     });
   });

@@ -54,7 +54,7 @@ async function handleCoachRespond(
 function handleHealth(): Response {
   return jsonResponse({
     ok: true,
-    service: "dj-lingo-coach-api",
+    service: "dj-coach-api",
     contractVersion: coachApiContractVersion,
   });
 }
