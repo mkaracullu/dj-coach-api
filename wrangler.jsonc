@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "dj-lingo-coach-api",
+  "name": "dj-coach-api",
   "main": "src/index.ts",
   "compatibility_date": "2026-06-18",
   "observability": {

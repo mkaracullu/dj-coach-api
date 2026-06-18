@@ -1,4 +1,4 @@
-# DJ Lingo Coach API
+# DJ Coach API
 
 Provider-neutral backend foundation for DJ Lingo Sprint 3B.4.1.
 
