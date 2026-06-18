@@ -1,4 +1,5 @@
 export const coachApiContractVersion = 1 as const;
+export const coachRequestIdHeader = "X-DJ-Request-Id" as const;
 
 export const coachApiLimits = {
   requestBodyMaxBytes: 16 * 1024,
@@ -13,6 +14,15 @@ export const coachApiLimits = {
   mobileTimeoutMs: 15_000,
   backendProviderTimeoutMs: 12_000,
 } as const;
+
+export function isValidCoachRequestId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= coachApiLimits.requestIdMaxChars &&
+    /^[A-Za-z0-9_-]+$/.test(value)
+  );
+}
 
 export const coachServerPolicy = {
   anonymousIpMaxRequestsPerTenMinutes: 10,

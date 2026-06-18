@@ -1,10 +1,15 @@
 import { coachApiContractVersion } from "./contracts/CoachApiContract";
-import { buildMockCoachResponse } from "./coach/mockCoach";
+import {
+  CoachService,
+  getCoachApiResponse,
+  mockCoachService,
+} from "./coach/coachService";
 import { ApiError } from "./http/ApiError";
 import {
   apiError,
   emptyCorsResponse,
   errorResponse,
+  getSafeRequestIdHeader,
   jsonResponse,
   readJsonBody,
 } from "./http/json";
@@ -16,22 +21,18 @@ export type Env = {
   COACH_RATE_LIMITER?: RateLimit;
 };
 
-function getRequestIdFromUnknownBody(value: unknown): string | undefined {
-  if (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    typeof (value as { requestId?: unknown }).requestId === "string"
-  ) {
-    return (value as { requestId: string }).requestId;
-  }
-
-  return undefined;
-}
+export type CoachWorker = {
+  fetch(
+    request: Request,
+    env: Env,
+    context?: ExecutionContext
+  ): Promise<Response>;
+};
 
 async function handleCoachRespond(
   request: Request,
-  env: Env
+  env: Env,
+  coachService: CoachService
 ): Promise<Response> {
   if (request.method !== "POST") {
     throw apiError("method_not_allowed", "Method not allowed.", 405);
@@ -40,15 +41,9 @@ async function handleCoachRespond(
   await enforceRateLimit(request, env);
 
   const rawBody = await readJsonBody(request);
-  const requestId = getRequestIdFromUnknownBody(rawBody);
   const coachRequest = validateCoachApiRequest(rawBody);
-  const mockResponse = buildMockCoachResponse(coachRequest);
-
-  return jsonResponse({
-    contractVersion: coachApiContractVersion,
-    requestId: coachRequest.requestId,
-    response: mockResponse,
-  });
+  const coachResponse = await getCoachApiResponse(coachRequest, coachService);
+  return jsonResponse(coachResponse);
 }
 
 function handleHealth(): Response {
@@ -59,7 +54,11 @@ function handleHealth(): Response {
   });
 }
 
-async function route(request: Request, env: Env): Promise<Response> {
+async function route(
+  request: Request,
+  env: Env,
+  coachService: CoachService
+): Promise<Response> {
   if (request.method === "OPTIONS") {
     return emptyCorsResponse();
   }
@@ -75,30 +74,39 @@ async function route(request: Request, env: Env): Promise<Response> {
   }
 
   if (url.pathname === "/v1/coach/respond") {
-    return handleCoachRespond(request, env);
+    return handleCoachRespond(request, env, coachService);
   }
 
   throw apiError("not_found", "Route not found.", 404);
 }
 
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    let requestId: string | undefined;
+export function createWorker(
+  coachService: CoachService = mockCoachService
+): CoachWorker {
+  return {
+    async fetch(request: Request, env: Env): Promise<Response> {
+      const requestId = getSafeRequestIdHeader(request);
 
-    try {
-      requestId = request.headers.get("X-DJ-Lingo-Request-Id") ?? undefined;
-      return await route(request, env);
-    } catch (error) {
-      if (error instanceof ApiError) {
-        return errorResponse(error, requestId);
+      try {
+        return await route(request, env, coachService);
+      } catch (error) {
+        if (error instanceof ApiError) {
+          return errorResponse(error, requestId);
+        }
+
+        console.error("Unhandled coach API error", error);
+
+        return errorResponse(
+          apiError(
+            "server_failure",
+            "Coach service is temporarily unavailable.",
+            500
+          ),
+          requestId
+        );
       }
+    },
+  };
+}
 
-      console.error("Unhandled coach API error", error);
-
-      return errorResponse(
-        apiError("server_failure", "Coach service is temporarily unavailable.", 500),
-        requestId
-      );
-    }
-  },
-} satisfies ExportedHandler<Env>;
+export default createWorker() satisfies ExportedHandler<Env>;

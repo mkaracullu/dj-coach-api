@@ -15,6 +15,7 @@ import {
   controllerBrandValues,
   controllerStatusValues,
   interactionTypeValues,
+  isValidCoachRequestId,
   mentorIdValues,
   preferredGenreValues,
   session7LandingResultValues,
@@ -56,12 +57,7 @@ function normalizeText(value: string): string {
 }
 
 function validateRequestId(value: unknown): string {
-  if (
-    typeof value !== "string" ||
-    value.length === 0 ||
-    value.length > coachApiLimits.requestIdMaxChars ||
-    !/^[A-Za-z0-9_-]+$/.test(value)
-  ) {
+  if (!isValidCoachRequestId(value)) {
     throw apiError("invalid_request", "Request ID is invalid.", 400);
   }
 

@@ -1,13 +1,22 @@
-import { coachApiLimits } from "../contracts/CoachApiContract";
+import {
+  coachApiLimits,
+  coachRequestIdHeader,
+  isValidCoachRequestId,
+} from "../contracts/CoachApiContract";
 import { ApiError, ApiErrorCode } from "./ApiError";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers":
-    "Accept, Content-Type, X-DJ-Lingo-Request-Id, X-DJ-Lingo-Install-Id",
+    `Accept, Content-Type, ${coachRequestIdHeader}, X-DJ-Lingo-Install-Id`,
   "Access-Control-Max-Age": "86400",
 } as const;
+
+export function getSafeRequestIdHeader(request: Request): string | undefined {
+  const requestId = request.headers.get(coachRequestIdHeader);
+  return isValidCoachRequestId(requestId) ? requestId : undefined;
+}
 
 export function jsonResponse(
   body: unknown,

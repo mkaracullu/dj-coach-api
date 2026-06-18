@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import worker, { Env } from "../src/index";
+import worker, { createWorker, Env } from "../src/index";
 import type { CoachApiSuccessResponseV1 } from "../src/contracts/CoachApiContract";
 
 const validRequest = {
@@ -36,7 +36,7 @@ function makeRequest(body: unknown, headers?: HeadersInit): Request {
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "X-DJ-Lingo-Request-Id": "coach_test_1",
+      "X-DJ-Request-Id": "coach_test_1",
       ...headers,
     },
     body: typeof body === "string" ? body : JSON.stringify(body),
@@ -78,6 +78,19 @@ describe("DJ Lingo Coach API", () => {
     expect(typeof body.response.nextActionLabel).toBe("string");
   });
 
+  it("uses the validated body request ID for successful responses", async () => {
+    const response = await worker.fetch(
+      makeRequest(validRequest, {
+        "X-DJ-Request-Id": "different_valid_header_id",
+      }),
+      {}
+    );
+    const body = (await response.json()) as CoachApiSuccessResponseV1;
+
+    expect(response.status).toBe(200);
+    expect(body.requestId).toBe(validRequest.requestId);
+  });
+
   it("rejects malformed JSON", async () => {
     const response = await worker.fetch(makeRequest("{"), {});
 
@@ -87,8 +100,45 @@ describe("DJ Lingo Coach API", () => {
     expect(body).toMatchObject({
       error: {
         code: "invalid_json",
+        requestId: "coach_test_1",
       },
     });
+  });
+
+  it("does not reflect an invalid canonical request ID header", async () => {
+    const response = await worker.fetch(
+      makeRequest("{", {
+        "X-DJ-Request-Id": "invalid request id",
+      }),
+      {}
+    );
+    const body = (await response.json()) as {
+      error: { requestId?: string };
+    };
+
+    expect(response.status).toBe(400);
+    expect(body).toEqual({
+      error: {
+        code: "invalid_json",
+        message: "Request body must be valid JSON.",
+      },
+    });
+  });
+
+  it("does not treat the former request ID header as canonical", async () => {
+    const response = await worker.fetch(
+      makeRequest("{", {
+        "X-DJ-Request-Id": "",
+        "X-DJ-Lingo-Request-Id": "legacy_request_id",
+      }),
+      {}
+    );
+    const body = (await response.json()) as {
+      error: { requestId?: string };
+    };
+
+    expect(response.status).toBe(400);
+    expect(body.error.requestId).toBeUndefined();
   });
 
   it("rejects unsupported fields", async () => {
@@ -172,14 +222,14 @@ describe("DJ Lingo Coach API", () => {
               completedAt: "2026-06-18T12:00:00.000Z",
               landingResult: "early",
               landingOffsetMs: -180,
-              landingTimingScore: 38,
+              landingTimingScore: 25,
               nextFocusId: "timing",
             },
             bestAttempt: {
               completedAt: "2026-06-18T12:00:00.000Z",
               landingResult: "early",
               landingOffsetMs: -180,
-              landingTimingScore: 38,
+              landingTimingScore: 25,
               nextFocusId: "timing",
             },
             currentNextFocusId: "timing",
@@ -194,5 +244,33 @@ describe("DJ Lingo Coach API", () => {
     const body = (await response.json()) as CoachApiSuccessResponseV1;
     expect(body.response.responseType).toBe("attempt_feedback");
     expect(body.response.message).toContain("early");
+  });
+
+  it("does not return invalid internal output as a successful response", async () => {
+    const invalidWorker = createWorker({
+      async respond(request) {
+        return {
+          contractVersion: 1,
+          requestId: `${request.requestId}_mismatch`,
+          response: {
+            message: "Internal provider output.",
+            nextActionLabel: null,
+            responseType: "lesson_explanation",
+            fallbackReasonId: null,
+          },
+        };
+      },
+    });
+    const response = await invalidWorker.fetch(makeRequest(validRequest), {});
+    const body = await response.json();
+
+    expect(response.status).toBe(500);
+    expect(body).toEqual({
+      error: {
+        code: "server_failure",
+        message: "Coach service is temporarily unavailable.",
+        requestId: "coach_test_1",
+      },
+    });
   });
 });
