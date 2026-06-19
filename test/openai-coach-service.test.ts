@@ -428,9 +428,7 @@ describe("OpenAI reference coach adapter", () => {
   });
 
   it("uses deterministic fallback when configured provider output is invalid", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
+    const fallbackResults: string[] = [];
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({
         rawModelText: "unsupported output",
@@ -444,7 +442,8 @@ describe("OpenAI reference coach adapter", () => {
         OPENAI_API_KEY: "test-key-not-real",
         OPENAI_MODEL: "reference-model",
       },
-      fetchImplementation
+      fetchImplementation,
+      (result) => fallbackResults.push(result)
     );
     const response = await getCoachApiResponse(fixture.request, service);
 
@@ -463,19 +462,11 @@ describe("OpenAI reference coach adapter", () => {
     expect(JSON.stringify(response)).not.toContain("tokenUsage");
     expect(JSON.stringify(response)).not.toContain("rawModelText");
 
-    const safeLog = String(consoleError.mock.calls[0]?.[0]);
-    expect(safeLog).toContain('"deterministicFallbackUsed":true');
-    expect(safeLog).toContain("<redacted_unknown_field>");
-    expect(safeLog).not.toContain("unsupported output");
-    expect(safeLog).not.toContain("tokenUsage");
-    expect(safeLog).not.toContain("rawModelText");
-    consoleError.mockRestore();
+    expect(fallbackResults).toEqual(["provider_fallback"]);
   });
 
   it("uses deterministic fallback for structurally valid unsafe provider text", async () => {
-    const consoleError = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
+    const fallbackResults: string[] = [];
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({
         message: "I changed your progress and completed the lesson.",
@@ -490,7 +481,8 @@ describe("OpenAI reference coach adapter", () => {
         OPENAI_API_KEY: "test-key-not-real",
         OPENAI_MODEL: "reference-model",
       },
-      fetchImplementation
+      fetchImplementation,
+      (result) => fallbackResults.push(result)
     );
     const response = await getCoachApiResponse(fixture.request, service);
 
@@ -498,13 +490,7 @@ describe("OpenAI reference coach adapter", () => {
       "Focus on steady spacing between taps. The goal is not speed; it is control."
     );
 
-    const safeLog = String(consoleError.mock.calls[0]?.[0]);
-    expect(safeLog).toContain('"semanticSafetyFailed":true');
-    expect(safeLog).toContain(
-      '"semanticSafetyFailureCode":"app_state_mutation_claim"'
-    );
-    expect(safeLog).not.toContain("completed the lesson");
-    consoleError.mockRestore();
+    expect(fallbackResults).toEqual(["semantic_safety_fallback"]);
   });
 
   it("allows structurally valid safe capability denials", async () => {

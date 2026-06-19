@@ -115,5 +115,15 @@ Runtime provider configuration uses:
 - `OPENAI_MAX_OUTPUT_TOKENS` (optional, constrained to 100–800)
 
 OpenAI runtime mode activates only when the provider, key, and model are all
-present. Provider failures and invalid structured output use the deterministic
-fallback, and the public Coach API contract remains unchanged.
+present. Before any OpenAI runtime call, the Worker also requires the
+`COACH_PROVIDER_RATE_LIMITER` binding to return a valid successful result.
+Missing, invalid, throwing, or rejecting provider-call guardrails fail closed
+before `fetch` is called. Provider limiter rejection returns the existing
+rate-limited API error; unavailable or invalid guardrails return the typed
+`provider_guardrail_blocked` API error without exposing configuration details.
+
+The provider-call limiter is a short-window abuse/cost guard, not a global
+daily budget counter. This repository has no accepted shared persistent counter,
+so it does not claim to enforce the daily policy values globally. Mock mode does
+not require provider-call budget guardrails. Deployed configuration remains
+`COACH_PROVIDER=mock`.

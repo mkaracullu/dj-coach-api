@@ -19,6 +19,10 @@ export type CoachService = {
   respond(request: CoachApiRequestV1): Promise<unknown>;
 };
 
+export type CoachServiceFallbackResult =
+  | "provider_fallback"
+  | "semantic_safety_fallback";
+
 export const mockCoachService: CoachService = {
   async respond(request) {
     return {
@@ -30,32 +34,19 @@ export const mockCoachService: CoachService = {
 };
 
 function withDeterministicFallback(
-  primaryService: CoachService
+  primaryService: CoachService,
+  onFallback?: (result: CoachServiceFallbackResult) => void
 ): CoachService {
   return {
     async respond(request) {
       try {
         return await primaryService.respond(request);
       } catch (error) {
-        const safeDiagnostics =
-          error instanceof OpenAiProviderError
-            ? {
-                ...error.diagnostics,
-                deterministicFallbackUsed: true,
-              }
-            : null;
-
-        console.error(
-          JSON.stringify({
-            message: "Coach provider failed; using deterministic fallback.",
-            errorType:
-              error instanceof OpenAiProviderError
-                ? error.errorType
-                : error instanceof Error
-                  ? error.name
-                  : "UnknownProviderError",
-            diagnostics: safeDiagnostics,
-          })
+        onFallback?.(
+          error instanceof OpenAiProviderError &&
+              error.diagnostics.semanticSafetyFailed
+            ? "semantic_safety_fallback"
+            : "provider_fallback"
         );
         return mockCoachService.respond(request);
       }
@@ -65,7 +56,8 @@ function withDeterministicFallback(
 
 export function createConfiguredCoachService(
   env: CoachProviderEnvironment,
-  fetchImplementation: typeof fetch = fetch
+  fetchImplementation: typeof fetch = fetch,
+  onFallback?: (result: CoachServiceFallbackResult) => void
 ): CoachService {
   const config = resolveCoachProviderConfig(env);
 
@@ -74,7 +66,8 @@ export function createConfiguredCoachService(
   }
 
   return withDeterministicFallback(
-    new OpenAiCoachService(config, fetchImplementation)
+    new OpenAiCoachService(config, fetchImplementation),
+    onFallback
   );
 }
 

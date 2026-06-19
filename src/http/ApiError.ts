@@ -5,6 +5,7 @@ export type ApiErrorCode =
   | "invalid_request"
   | "request_too_large"
   | "rate_limited"
+  | "provider_guardrail_blocked"
   | "server_failure";
 
 export class ApiError extends Error {

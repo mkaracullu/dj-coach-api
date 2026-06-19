@@ -2,9 +2,10 @@ import { apiError } from "./http/json";
 
 export type CoachRateLimitEnv = {
   COACH_RATE_LIMITER?: RateLimit;
+  COACH_PROVIDER_RATE_LIMITER?: RateLimit;
 };
 
-function getRateLimitKey(request: Request): string {
+function getRateLimitIdentity(request: Request): string {
   const ipAddress = request.headers.get("CF-Connecting-IP")?.trim();
 
   if (ipAddress) {
@@ -14,7 +15,25 @@ function getRateLimitKey(request: Request): string {
   return "anonymous";
 }
 
-export async function enforceRateLimit(
+function providerGuardrailError() {
+  return apiError(
+    "provider_guardrail_blocked",
+    "Coach service is temporarily unavailable.",
+    503
+  );
+}
+
+function isRateLimitOutcome(
+  value: unknown
+): value is { success: boolean } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof Reflect.get(value, "success") === "boolean"
+  );
+}
+
+export async function enforceRequestRateLimit(
   request: Request,
   env: CoachRateLimitEnv
 ): Promise<void> {
@@ -22,10 +41,45 @@ export async function enforceRateLimit(
     return;
   }
 
-  const key = getRateLimitKey(request);
+  const key = getRateLimitIdentity(request);
   const result = await env.COACH_RATE_LIMITER.limit({ key: `coach:${key}` });
 
   if (!result.success) {
+    throw apiError(
+      "rate_limited",
+      "Coach request rate limit was reached.",
+      429,
+      60
+    );
+  }
+}
+
+export async function enforceProviderCallGuard(
+  request: Request,
+  env: CoachRateLimitEnv,
+  provider: "openai"
+): Promise<void> {
+  if (!env.COACH_PROVIDER_RATE_LIMITER) {
+    throw providerGuardrailError();
+  }
+
+  let providerCallAllowed: boolean;
+
+  try {
+    const result: unknown = await env.COACH_PROVIDER_RATE_LIMITER.limit({
+      key: `coach-provider:${provider}:${getRateLimitIdentity(request)}`,
+    });
+
+    if (!isRateLimitOutcome(result)) {
+      throw new Error("Invalid provider rate-limit outcome.");
+    }
+
+    providerCallAllowed = result.success;
+  } catch {
+    throw providerGuardrailError();
+  }
+
+  if (!providerCallAllowed) {
     throw apiError(
       "rate_limited",
       "Coach request rate limit was reached.",
