@@ -12,6 +12,11 @@ import {
   InvalidCoachResponseError,
   validateCoachApiSuccessResponse,
 } from "./coachResponseValidator";
+import {
+  CoachRuntimeSafetyFailureCode,
+  UnsafeCoachResponseError,
+  validateCoachRuntimeSemanticSafety,
+} from "./coachRuntimeSafety";
 import { buildOpenAiCoachPrompt } from "./coachPrompt";
 import type { OpenAiCoachConfig } from "./providerConfig";
 
@@ -53,6 +58,8 @@ export type OpenAiSafeDiagnostics = {
   responseWordLimitExceeded: boolean;
   responseByteLimitExceeded: boolean;
   nextActionLabelLimitExceeded: boolean;
+  semanticSafetyFailed: boolean;
+  semanticSafetyFailureCode: CoachRuntimeSafetyFailureCode | null;
   deterministicFallbackUsed: boolean;
 };
 
@@ -75,6 +82,8 @@ function buildSafeDiagnostics(
     responseWordLimitExceeded: false,
     responseByteLimitExceeded: false,
     nextActionLabelLimitExceeded: false,
+    semanticSafetyFailed: false,
+    semanticSafetyFailureCode: null,
     deterministicFallbackUsed: false,
     ...overrides,
   };
@@ -476,6 +485,23 @@ export class OpenAiCoachService implements CoachService {
             validationFailureCode,
             request.requestId
           ),
+        })
+      );
+    }
+
+    try {
+      validateCoachRuntimeSemanticSafety(validatedResponse);
+    } catch (error) {
+      const semanticSafetyFailureCode =
+        error instanceof UnsafeCoachResponseError ? error.code : null;
+
+      throw new OpenAiProviderError(
+        "invalid_structured_output",
+        "Provider structured output failed runtime safety validation.",
+        buildSafeDiagnostics("invalid_structured_output", {
+          providerHttpStatus: providerResponse.status,
+          semanticSafetyFailed: true,
+          semanticSafetyFailureCode,
         })
       );
     }

@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import worker, { createWorker, Env } from "../src/index";
-import type { CoachApiSuccessResponseV1 } from "../src/contracts/CoachApiContract";
+import type {
+  CoachApiRequestV1,
+  CoachApiSuccessResponseV1,
+} from "../src/contracts/CoachApiContract";
+import type { CoachService } from "../src/coach/coachService";
+
+// Keep this external transport shape aligned with the identically named
+// mobile fixture in RemoteCoachService.test.ts.
+const mobileShapedSession7AttemptFixture = {
+  landingResult: "early" as const,
+  landingOffsetMs: -180,
+  landingTimingScore: 25,
+  nextFocusId: "timing" as const,
+};
 
 const validRequest = {
   contractVersion: 1,
@@ -41,6 +54,23 @@ function makeRequest(body: unknown, headers?: HeadersInit): Request {
     },
     body: typeof body === "string" ? body : JSON.stringify(body),
   });
+}
+
+function createTrackingCoachService(): CoachService & {
+  respond: ReturnType<typeof vi.fn>;
+} {
+  return {
+    respond: vi.fn(async (request: CoachApiRequestV1) => ({
+      contractVersion: 1,
+      requestId: request.requestId,
+      response: {
+        message: "Safe scoped coach response.",
+        nextActionLabel: "Try the lesson step.",
+        responseType: "lesson_explanation",
+        fallbackReasonId: null,
+      },
+    })),
+  };
 }
 
 describe("DJ Lingo Coach API", () => {
@@ -208,6 +238,103 @@ describe("DJ Lingo Coach API", () => {
     });
   });
 
+  it("rejects valid free text before calling the coach service", async () => {
+    const coachService = createTrackingCoachService();
+    const scopedWorker = createWorker(coachService);
+    const response = await scopedWorker.fetch(
+      makeRequest({
+        ...validRequest,
+        question: {
+          source: "free_text",
+          question: "How should I practice this?",
+        },
+      }),
+      {}
+    );
+
+    expect(response.status).toBe(400);
+    expect(coachService.respond).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 3, 4, 5, 6] as const)(
+    "rejects Session %s before calling the coach service",
+    async (sessionNumber) => {
+      const coachService = createTrackingCoachService();
+      const scopedWorker = createWorker(coachService);
+      const response = await scopedWorker.fetch(
+        makeRequest({
+          ...validRequest,
+          context: {
+            ...validRequest.context,
+            lesson: {
+              ...validRequest.context.lesson,
+              sessionNumber,
+            },
+          },
+        }),
+        {}
+      );
+
+      expect(response.status).toBe(400);
+      expect(coachService.respond).not.toHaveBeenCalled();
+    }
+  );
+
+  it("rejects a suggested question that is not allowed for its session", async () => {
+    const coachService = createTrackingCoachService();
+    const scopedWorker = createWorker(coachService);
+    const response = await scopedWorker.fetch(
+      makeRequest({
+        ...validRequest,
+        question: {
+          source: "suggested",
+          suggestedQuestionId: "explain_timing_result",
+        },
+      }),
+      {}
+    );
+
+    expect(response.status).toBe(400);
+    expect(coachService.respond).not.toHaveBeenCalled();
+  });
+
+  it("accepts allowed Session 2 and Session 7 suggested questions", async () => {
+    const coachService = createTrackingCoachService();
+    const scopedWorker = createWorker(coachService);
+    const session2Response = await scopedWorker.fetch(
+      makeRequest(validRequest),
+      {}
+    );
+    const session7Response = await scopedWorker.fetch(
+      makeRequest({
+        ...validRequest,
+        requestId: "coach_session_7_scope",
+        question: {
+          source: "suggested",
+          suggestedQuestionId: "explain_timing_result",
+        },
+        context: {
+          ...validRequest.context,
+          lesson: {
+            sessionNumber: 7,
+            lessonId: "mini-attempt-review",
+            lessonPhase: "result",
+            activityType: "miniAttempt",
+          },
+          session7: {
+            latestAttempt: mobileShapedSession7AttemptFixture,
+            currentNextFocusId: "timing",
+          },
+        },
+      }),
+      {}
+    );
+
+    expect(session2Response.status).toBe(200);
+    expect(session7Response.status).toBe(200);
+    expect(coachService.respond).toHaveBeenCalledTimes(2);
+  });
+
   it("returns 429 when the rate limiter rejects the key", async () => {
     const env: Env = {
       COACH_RATE_LIMITER: {
@@ -230,6 +357,39 @@ describe("DJ Lingo Coach API", () => {
     });
   });
 
+  it("ignores install-ID headers when choosing the rate-limit key", async () => {
+    const limit = vi.fn(async () => ({ success: true }));
+    const response = await worker.fetch(
+      makeRequest(validRequest, {
+        "CF-Connecting-IP": "203.0.113.10",
+        "X-DJ-Lingo-Install-Id": "legacy_install_id",
+      }),
+      {
+        COACH_RATE_LIMITER: { limit } as unknown as RateLimit,
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(limit).toHaveBeenCalledWith({
+      key: "coach:ip:203.0.113.10",
+    });
+  });
+
+  it("does not use an install-ID header as anonymous request identity", async () => {
+    const limit = vi.fn(async () => ({ success: true }));
+    const response = await worker.fetch(
+      makeRequest(validRequest, {
+        "X-DJ-Lingo-Install-Id": "legacy_install_id",
+      }),
+      {
+        COACH_RATE_LIMITER: { limit } as unknown as RateLimit,
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(limit).toHaveBeenCalledWith({ key: "coach:anonymous" });
+  });
+
   it("returns Session 7 timing feedback when attempt context exists", async () => {
     const response = await worker.fetch(
       makeRequest({
@@ -247,20 +407,8 @@ describe("DJ Lingo Coach API", () => {
             activityType: "miniAttempt",
           },
           session7: {
-            latestAttempt: {
-              completedAt: "2026-06-18T12:00:00.000Z",
-              landingResult: "early",
-              landingOffsetMs: -180,
-              landingTimingScore: 25,
-              nextFocusId: "timing",
-            },
-            bestAttempt: {
-              completedAt: "2026-06-18T12:00:00.000Z",
-              landingResult: "early",
-              landingOffsetMs: -180,
-              landingTimingScore: 25,
-              nextFocusId: "timing",
-            },
+            latestAttempt: mobileShapedSession7AttemptFixture,
+            bestAttempt: mobileShapedSession7AttemptFixture,
             currentNextFocusId: "timing",
           },
         },

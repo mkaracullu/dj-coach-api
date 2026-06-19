@@ -5,6 +5,7 @@ import {
 } from "../contracts/CoachApiContract";
 import { buildMockCoachResponse } from "./mockCoach";
 import { validateCoachApiSuccessResponse } from "./coachResponseValidator";
+import { validateCoachRuntimeSemanticSafety } from "./coachRuntimeSafety";
 import {
   OpenAiCoachService,
   OpenAiProviderError,
@@ -82,5 +83,9 @@ export async function getCoachApiResponse(
   service: CoachService = mockCoachService
 ): Promise<CoachApiSuccessResponseV1> {
   const candidate = await service.respond(request);
-  return validateCoachApiSuccessResponse(candidate, request.requestId);
+  const validatedResponse = validateCoachApiSuccessResponse(
+    candidate,
+    request.requestId
+  );
+  return validateCoachRuntimeSemanticSafety(validatedResponse);
 }

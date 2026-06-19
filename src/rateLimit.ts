@@ -5,12 +5,6 @@ export type CoachRateLimitEnv = {
 };
 
 function getRateLimitKey(request: Request): string {
-  const installationId = request.headers.get("X-DJ-Lingo-Install-Id")?.trim();
-
-  if (installationId && /^[A-Za-z0-9_-]{8,120}$/.test(installationId)) {
-    return `install:${installationId}`;
-  }
-
   const ipAddress = request.headers.get("CF-Connecting-IP")?.trim();
 
   if (ipAddress) {

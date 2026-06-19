@@ -203,7 +203,6 @@ export type CoachApiProgressContextV1 = {
 };
 
 export type CoachApiSession7AttemptV1 = {
-  completedAt: string;
   landingResult: Session7LandingResult;
   landingOffsetMs: number;
   landingTimingScore: number;

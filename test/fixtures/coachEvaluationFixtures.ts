@@ -64,7 +64,6 @@ function buildRequest(
         ? {
             session7: {
               latestAttempt: {
-                completedAt: "2026-06-18T12:00:00.000Z",
                 landingResult,
                 landingOffsetMs:
                   landingResult === "early"

@@ -471,4 +471,62 @@ describe("OpenAI reference coach adapter", () => {
     expect(safeLog).not.toContain("rawModelText");
     consoleError.mockRestore();
   });
+
+  it("uses deterministic fallback for structurally valid unsafe provider text", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      providerResponse({
+        message: "I changed your progress and completed the lesson.",
+        nextActionLabel: "Continue to the next session.",
+        responseType: "lesson_explanation",
+        fallbackReasonId: null,
+      })
+    );
+    const service = createConfiguredCoachService(
+      {
+        COACH_PROVIDER: "openai",
+        OPENAI_API_KEY: "test-key-not-real",
+        OPENAI_MODEL: "reference-model",
+      },
+      fetchImplementation
+    );
+    const response = await getCoachApiResponse(fixture.request, service);
+
+    expect(response.response.message).toBe(
+      "Focus on steady spacing between taps. The goal is not speed; it is control."
+    );
+
+    const safeLog = String(consoleError.mock.calls[0]?.[0]);
+    expect(safeLog).toContain('"semanticSafetyFailed":true');
+    expect(safeLog).toContain(
+      '"semanticSafetyFailureCode":"app_state_mutation_claim"'
+    );
+    expect(safeLog).not.toContain("completed the lesson");
+    consoleError.mockRestore();
+  });
+
+  it("allows structurally valid safe capability denials", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      providerResponse({
+        message:
+          "I can't inspect your controller, but you can count 1-2-3-4 and press Play on the next strong 1.",
+        nextActionLabel: "Practice the count before pressing Play.",
+        responseType: "setup_guidance",
+        fallbackReasonId: null,
+      })
+    );
+    const service = new OpenAiCoachService(
+      openAiConfig(),
+      fetchImplementation
+    );
+
+    await expect(service.respond(fixture.request)).resolves.toMatchObject({
+      response: {
+        message: expect.stringContaining("can't inspect your controller"),
+        responseType: "setup_guidance",
+      },
+    });
+  });
 });

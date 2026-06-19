@@ -15,6 +15,7 @@ import {
   readJsonBody,
 } from "./http/json";
 import { enforceRateLimit } from "./rateLimit";
+import { validateCoachProductScope } from "./validation/coachProductScopeValidator";
 import { validateCoachApiRequest } from "./validation/coachRequestValidator";
 
 export type Env = CoachProviderEnvironment & {
@@ -43,6 +44,7 @@ async function handleCoachRespond(
 
   const rawBody = await readJsonBody(request);
   const coachRequest = validateCoachApiRequest(rawBody);
+  validateCoachProductScope(coachRequest);
   const coachResponse = await getCoachApiResponse(coachRequest, coachService);
   return jsonResponse(coachResponse);
 }

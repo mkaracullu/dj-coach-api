@@ -326,14 +326,12 @@ function validateSession7Attempt(
 
   if (
     !hasOnlyKeys(value, [
-      "completedAt",
       "landingResult",
       "landingOffsetMs",
       "landingTimingScore",
       "nextFocusId",
     ]) ||
     !hasRequiredKeys(value, [
-      "completedAt",
       "landingResult",
       "landingOffsetMs",
       "landingTimingScore",
@@ -341,15 +339,6 @@ function validateSession7Attempt(
     ])
   ) {
     throw apiError("invalid_request", `${label} shape is invalid.`, 400);
-  }
-
-  if (
-    typeof value.completedAt !== "string" ||
-    value.completedAt.length === 0 ||
-    value.completedAt.length > 40 ||
-    Number.isNaN(Date.parse(value.completedAt))
-  ) {
-    throw apiError("invalid_request", `${label} timestamp is invalid.`, 400);
   }
 
   if (!isOneOf(value.landingResult, session7LandingResultValues)) {
@@ -378,7 +367,6 @@ function validateSession7Attempt(
   }
 
   return {
-    completedAt: value.completedAt,
     landingResult: value.landingResult,
     landingOffsetMs: value.landingOffsetMs,
     landingTimingScore: value.landingTimingScore,
