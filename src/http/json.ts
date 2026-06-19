@@ -9,7 +9,7 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers":
-    `Accept, Content-Type, ${coachRequestIdHeader}, X-DJ-Lingo-Install-Id`,
+    `Accept, Content-Type, ${coachRequestIdHeader}`,
   "Access-Control-Max-Age": "86400",
 } as const;
 

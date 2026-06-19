@@ -44,6 +44,23 @@ function makeRequest(body: unknown, headers?: HeadersInit): Request {
 }
 
 describe("DJ Lingo Coach API", () => {
+  it("allows only the required public request headers in CORS preflight", async () => {
+    const response = await worker.fetch(
+      new Request("https://api.example.test/v1/coach/respond", {
+        method: "OPTIONS",
+      }),
+      {}
+    );
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
+      "Accept, Content-Type, X-DJ-Request-Id"
+    );
+    expect(
+      response.headers.get("Access-Control-Allow-Headers")
+    ).not.toContain("Install-Id");
+  });
+
   it("returns health status", async () => {
     const response = await worker.fetch(
       new Request("https://api.example.test/health"),
