@@ -7,7 +7,8 @@
     "enabled": true
   },
   "vars": {
-    "ENVIRONMENT": "development"
+    "ENVIRONMENT": "development",
+    "COACH_PROVIDER": "mock"
   },
   "ratelimits": [
     {

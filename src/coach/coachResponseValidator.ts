@@ -28,11 +28,28 @@ const allowedFallbackReasons: Record<
 };
 
 export class InvalidCoachResponseError extends Error {
-  constructor(message: string) {
+  constructor(
+    readonly code: CoachResponseValidationFailureCode,
+    message: string
+  ) {
     super(message);
     this.name = "InvalidCoachResponseError";
   }
 }
+
+export type CoachResponseValidationFailureCode =
+  | "invalid_envelope"
+  | "unsupported_contract_version"
+  | "invalid_request_id"
+  | "invalid_payload_shape"
+  | "invalid_message"
+  | "invalid_next_action"
+  | "invalid_response_type"
+  | "invalid_fallback_reason"
+  | "invalid_fallback_reason_combination"
+  | "response_word_limit_exceeded"
+  | "response_serialization_failed"
+  | "response_byte_limit_exceeded";
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -61,8 +78,11 @@ function countWords(value: string): number {
   return normalized.length === 0 ? 0 : normalized.split(/\s+/).length;
 }
 
-function fail(message: string): never {
-  throw new InvalidCoachResponseError(message);
+function fail(
+  code: CoachResponseValidationFailureCode,
+  message: string
+): never {
+  throw new InvalidCoachResponseError(code, message);
 }
 
 export function validateCoachApiSuccessResponse(
@@ -73,18 +93,21 @@ export function validateCoachApiSuccessResponse(
     !isPlainObject(value) ||
     !hasExactKeys(value, ["contractVersion", "requestId", "response"])
   ) {
-    fail("Coach response envelope is invalid.");
+    fail("invalid_envelope", "Coach response envelope is invalid.");
   }
 
   if (value.contractVersion !== coachApiContractVersion) {
-    fail("Coach response contract version is unsupported.");
+    fail(
+      "unsupported_contract_version",
+      "Coach response contract version is unsupported."
+    );
   }
 
   if (
     !isValidCoachRequestId(value.requestId) ||
     value.requestId !== expectedRequestId
   ) {
-    fail("Coach response request ID does not match.");
+    fail("invalid_request_id", "Coach response request ID does not match.");
   }
 
   if (
@@ -96,7 +119,7 @@ export function validateCoachApiSuccessResponse(
       "fallbackReasonId",
     ])
   ) {
-    fail("Coach response payload is invalid.");
+    fail("invalid_payload_shape", "Coach response payload is invalid.");
   }
 
   const { message, nextActionLabel, responseType, fallbackReasonId } =
@@ -107,7 +130,7 @@ export function validateCoachApiSuccessResponse(
     message.trim().length === 0 ||
     message.length > coachApiLimits.messageMaxChars
   ) {
-    fail("Coach response message is invalid.");
+    fail("invalid_message", "Coach response message is invalid.");
   }
 
   if (
@@ -116,22 +139,28 @@ export function validateCoachApiSuccessResponse(
       nextActionLabel.trim().length === 0 ||
       nextActionLabel.length > coachApiLimits.nextActionLabelMaxChars)
   ) {
-    fail("Coach response next action is invalid.");
+    fail("invalid_next_action", "Coach response next action is invalid.");
   }
 
   if (!isOneOf(responseType, coachResponseTypeValues)) {
-    fail("Coach response type is invalid.");
+    fail("invalid_response_type", "Coach response type is invalid.");
   }
 
   if (
     fallbackReasonId !== null &&
     !isOneOf(fallbackReasonId, coachFallbackReasonIdValues)
   ) {
-    fail("Coach response fallback reason is invalid.");
+    fail(
+      "invalid_fallback_reason",
+      "Coach response fallback reason is invalid."
+    );
   }
 
   if (!allowedFallbackReasons[responseType].includes(fallbackReasonId)) {
-    fail("Coach response fallback reason does not match its response type.");
+    fail(
+      "invalid_fallback_reason_combination",
+      "Coach response fallback reason does not match its response type."
+    );
   }
 
   const totalWords =
@@ -139,7 +168,10 @@ export function validateCoachApiSuccessResponse(
     (typeof nextActionLabel === "string" ? countWords(nextActionLabel) : 0);
 
   if (totalWords > coachApiLimits.responseHardMaxWords) {
-    fail("Coach response text is too long.");
+    fail(
+      "response_word_limit_exceeded",
+      "Coach response text is too long."
+    );
   }
 
   let serializedResponse: string;
@@ -147,14 +179,20 @@ export function validateCoachApiSuccessResponse(
   try {
     serializedResponse = JSON.stringify(value);
   } catch {
-    fail("Coach response cannot be serialized.");
+    fail(
+      "response_serialization_failed",
+      "Coach response cannot be serialized."
+    );
   }
 
   if (
     new TextEncoder().encode(serializedResponse).byteLength >
     coachApiLimits.responseBodyMaxBytes
   ) {
-    fail("Coach response body is too large.");
+    fail(
+      "response_byte_limit_exceeded",
+      "Coach response body is too large."
+    );
   }
 
   return {

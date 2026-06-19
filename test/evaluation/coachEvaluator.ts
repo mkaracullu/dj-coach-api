@@ -1,4 +1,8 @@
-import type { CoachApiSuccessResponseV1 } from "../../src/contracts/CoachApiContract";
+import type {
+  CoachApiSuccessResponseV1,
+  CoachResponseType,
+} from "../../src/contracts/CoachApiContract";
+import type { OpenAiSafeDiagnostics } from "../../src/coach/openAiCoachService";
 import {
   InvalidCoachResponseError,
   validateCoachApiSuccessResponse,
@@ -29,6 +33,14 @@ export type EvaluationCriterion =
 
 export type CoachEvaluationReport = {
   fixtureId: string;
+  provider: string;
+  model: string | null;
+  validStructuredOutput: boolean;
+  responseType: CoachResponseType | null;
+  expectedResponseTypes: readonly CoachResponseType[];
+  actualResponseType: CoachResponseType | null;
+  matchedRequiredTerms: string[];
+  missingRequiredTerms: string[];
   hardGatePassed: boolean;
   hardGateFailures: EvaluationHardGateId[];
   scores: Record<EvaluationCriterion, 0 | 1 | null>;
@@ -36,7 +48,34 @@ export type CoachEvaluationReport = {
   maxScore: number;
   latencyMs: number | null;
   estimatedCostUsd: number | null;
-  providerUsage: null;
+  providerUsage: {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+  } | null;
+  errorType: string | null;
+  diagnostics: OpenAiSafeDiagnostics | null;
+};
+
+export type CoachEvaluationMetadata = Pick<
+  CoachEvaluationReport,
+  | "provider"
+  | "model"
+  | "latencyMs"
+  | "estimatedCostUsd"
+  | "providerUsage"
+  | "errorType"
+  | "diagnostics"
+>;
+
+const defaultEvaluationMetadata: CoachEvaluationMetadata = {
+  provider: "deterministic_mock",
+  model: null,
+  latencyMs: null,
+  estimatedCostUsd: null,
+  providerUsage: null,
+  errorType: null,
+  diagnostics: null,
 };
 
 const unsupportedCommandPatterns = [
@@ -104,10 +143,18 @@ function hasExpectedLanguage(text: string, language: EvaluationLanguage): boolea
 }
 
 function buildInvalidReport(
-  fixture: CoachEvaluationFixture
+  fixture: CoachEvaluationFixture,
+  metadata: CoachEvaluationMetadata
 ): CoachEvaluationReport {
   return {
     fixtureId: fixture.id,
+    ...metadata,
+    validStructuredOutput: false,
+    responseType: null,
+    expectedResponseTypes: fixture.expectations.expectedResponseTypes,
+    actualResponseType: null,
+    matchedRequiredTerms: [],
+    missingRequiredTerms: [...fixture.expectations.requiredTerms],
     hardGatePassed: false,
     hardGateFailures: ["invalid_structured_output"],
     scores: {
@@ -123,15 +170,13 @@ function buildInvalidReport(
     },
     score: 0,
     maxScore: 8,
-    latencyMs: null,
-    estimatedCostUsd: null,
-    providerUsage: null,
   };
 }
 
 export function evaluateCoachResponse(
   fixture: CoachEvaluationFixture,
-  candidate: unknown
+  candidate: unknown,
+  metadata: CoachEvaluationMetadata = defaultEvaluationMetadata
 ): CoachEvaluationReport {
   let response: CoachApiSuccessResponseV1;
 
@@ -142,7 +187,7 @@ export function evaluateCoachResponse(
     );
   } catch (error) {
     if (error instanceof InvalidCoachResponseError) {
-      return buildInvalidReport(fixture);
+      return buildInvalidReport(fixture, metadata);
     }
 
     throw error;
@@ -188,9 +233,15 @@ export function evaluateCoachResponse(
   const hasCapabilityDenial =
     response.response.responseType === "capability_limit" ||
     /\b(?:cannot|can't|not connected|not available|unable)\b/i.test(text);
+  const matchedRequiredTerms = fixture.expectations.requiredTerms.filter(
+    (term) => includesAnyTerm(text, [term])
+  );
+  const missingRequiredTerms = fixture.expectations.requiredTerms.filter(
+    (term) => !matchedRequiredTerms.includes(term)
+  );
   const lessonAccurate =
     fixture.expectations.requiredTerms.length === 0 ||
-    includesAnyTerm(text, fixture.expectations.requiredTerms);
+    matchedRequiredTerms.length > 0;
   const goalAligned =
     !fixture.expectations.goalTerms ||
     includesAnyTerm(text, fixture.expectations.goalTerms);
@@ -241,13 +292,17 @@ export function evaluateCoachResponse(
 
   return {
     fixtureId: fixture.id,
+    ...metadata,
+    validStructuredOutput: true,
+    responseType: response.response.responseType,
+    expectedResponseTypes: fixture.expectations.expectedResponseTypes,
+    actualResponseType: response.response.responseType,
+    matchedRequiredTerms,
+    missingRequiredTerms,
     hardGatePassed: hardGateFailures.length === 0,
     hardGateFailures,
     scores,
     score: scoredValues.reduce<number>((total, value) => total + value, 0),
     maxScore: scoredValues.length,
-    latencyMs: null,
-    estimatedCostUsd: null,
-    providerUsage: null,
   };
 }

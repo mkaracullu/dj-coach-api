@@ -78,6 +78,18 @@ describe("DJ Lingo Coach API", () => {
     expect(typeof body.response.nextActionLabel).toBe("string");
   });
 
+  it("does not call OpenAI unless provider configuration is explicitly complete", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const response = await worker.fetch(makeRequest(validRequest), {
+      COACH_PROVIDER: "openai",
+      OPENAI_MODEL: "reference-model",
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
   it("uses the validated body request ID for successful responses", async () => {
     const response = await worker.fetch(
       makeRequest(validRequest, {

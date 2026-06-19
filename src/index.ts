@@ -1,9 +1,10 @@
 import { coachApiContractVersion } from "./contracts/CoachApiContract";
 import {
   CoachService,
+  createConfiguredCoachService,
   getCoachApiResponse,
-  mockCoachService,
 } from "./coach/coachService";
+import type { CoachProviderEnvironment } from "./coach/providerConfig";
 import { ApiError } from "./http/ApiError";
 import {
   apiError,
@@ -16,7 +17,7 @@ import {
 import { enforceRateLimit } from "./rateLimit";
 import { validateCoachApiRequest } from "./validation/coachRequestValidator";
 
-export type Env = {
+export type Env = CoachProviderEnvironment & {
   ENVIRONMENT?: string;
   COACH_RATE_LIMITER?: RateLimit;
 };
@@ -81,14 +82,18 @@ async function route(
 }
 
 export function createWorker(
-  coachService: CoachService = mockCoachService
+  coachService?: CoachService
 ): CoachWorker {
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const requestId = getSafeRequestIdHeader(request);
 
       try {
-        return await route(request, env, coachService);
+        return await route(
+          request,
+          env,
+          coachService ?? createConfiguredCoachService(env)
+        );
       } catch (error) {
         if (error instanceof ApiError) {
           return errorResponse(error, requestId);

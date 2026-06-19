@@ -95,6 +95,29 @@ describe("provider-neutral coach evaluation harness", () => {
 
     expect(report.hardGatePassed).toBe(false);
     expect(report.hardGateFailures).toEqual(["invalid_structured_output"]);
+    expect(report.actualResponseType).toBeNull();
+    expect(report.matchedRequiredTerms).toEqual([]);
+    expect(report.missingRequiredTerms).toEqual(
+      fixture.expectations.requiredTerms
+    );
+  });
+
+  it("reports expected response type and required-term matches", () => {
+    const fixture = coachEvaluationFixtures[0]!;
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(fixture, "Keep a steady pulse and focus on timing.")
+    );
+
+    expect(report.responseType).toBe("lesson_explanation");
+    expect(report.actualResponseType).toBe("lesson_explanation");
+    expect(report.expectedResponseTypes).toEqual(["lesson_explanation"]);
+    expect(report.matchedRequiredTerms).toEqual([
+      "steady",
+      "pulse",
+      "timing",
+    ]);
+    expect(report.missingRequiredTerms).toEqual(["spacing"]);
   });
 
   it("detects actionable piracy guidance and real-DJ persona content", () => {
