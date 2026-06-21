@@ -78,7 +78,7 @@ async function handleCoachRespond(
   let experimentVersion: string | undefined;
   let assignedProvider: CoachProviderId | undefined;
   let actualExternalProvider: CoachProviderId | undefined;
-  let fallbackCategory: CoachServiceFallbackResult | undefined;
+  let fallbackResult: CoachServiceFallbackResult | undefined;
   let stage: "method" | "validation" | "scope" | "guardrail" | "service" =
     "method";
 
@@ -131,12 +131,10 @@ async function handleCoachRespond(
       await enforceProviderCallGuard(request, env, providerConfig.provider);
     }
 
-    let fallbackResult: CoachServiceFallbackResult | undefined;
     const service =
       coachService ??
       createCoachServiceFromConfig(providerConfig, fetch, (fallback) => {
         fallbackResult = fallback;
-        fallbackCategory = fallback;
       });
 
     stage = "service";
@@ -146,7 +144,7 @@ async function handleCoachRespond(
     }
     const coachResponse = await getCoachApiResponse(coachRequest, service);
     fallbackReasonId = coachResponse.response.fallbackReasonId ?? undefined;
-    result = fallbackResult ?? "success";
+    result = fallbackResult?.category ?? "success";
     return jsonResponse(coachResponse);
   } catch (error) {
     if (error instanceof ApiError) {
@@ -184,7 +182,35 @@ async function handleCoachRespond(
       ...(experimentVersion ? { experimentVersion } : {}),
       ...(assignedProvider ? { assignedProvider } : {}),
       ...(actualExternalProvider ? { actualExternalProvider } : {}),
-      ...(fallbackCategory ? { fallbackCategory } : {}),
+      ...(fallbackResult
+        ? {
+            fallbackCategory: fallbackResult.category,
+            ...(fallbackResult.providerErrorCategory
+              ? {
+                  providerErrorCategory:
+                    fallbackResult.providerErrorCategory,
+                }
+              : {}),
+            ...(fallbackResult.providerHttpStatus !== undefined
+              ? {
+                  providerHttpStatus:
+                    fallbackResult.providerHttpStatus,
+                }
+              : {}),
+            ...(fallbackResult.responseValidationFailureCode
+              ? {
+                  responseValidationFailureCode:
+                    fallbackResult.responseValidationFailureCode,
+                }
+              : {}),
+            ...(fallbackResult.semanticSafetyFailureCode
+              ? {
+                  semanticSafetyFailureCode:
+                    fallbackResult.semanticSafetyFailureCode,
+                }
+              : {}),
+          }
+        : {}),
     });
   }
 }

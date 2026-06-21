@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createConfiguredCoachService,
   getCoachApiResponse,
+  type CoachServiceFallbackResult,
 } from "../src/coach/coachService";
 import {
   OpenAiCoachService,
@@ -429,7 +430,7 @@ describe("OpenAI reference coach adapter", () => {
   });
 
   it("uses deterministic fallback when configured provider output is invalid", async () => {
-    const fallbackResults: string[] = [];
+    const fallbackResults: CoachServiceFallbackResult[] = [];
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({
         rawModelText: "unsupported output",
@@ -463,11 +464,18 @@ describe("OpenAI reference coach adapter", () => {
     expect(JSON.stringify(response)).not.toContain("tokenUsage");
     expect(JSON.stringify(response)).not.toContain("rawModelText");
 
-    expect(fallbackResults).toEqual(["provider_fallback"]);
+    expect(fallbackResults).toEqual([
+      {
+        category: "provider_fallback",
+        providerErrorCategory: "invalid_structured_output",
+        providerHttpStatus: 200,
+        responseValidationFailureCode: "invalid_payload_shape",
+      },
+    ]);
   });
 
   it("uses deterministic fallback for structurally valid unsafe provider text", async () => {
-    const fallbackResults: string[] = [];
+    const fallbackResults: CoachServiceFallbackResult[] = [];
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({
         message: "I changed your progress and completed the lesson.",
@@ -491,7 +499,14 @@ describe("OpenAI reference coach adapter", () => {
       "Focus on steady spacing between taps. The goal is not speed; it is control."
     );
 
-    expect(fallbackResults).toEqual(["semantic_safety_fallback"]);
+    expect(fallbackResults).toEqual([
+      {
+        category: "semantic_safety_fallback",
+        providerErrorCategory: "invalid_structured_output",
+        providerHttpStatus: 200,
+        semanticSafetyFailureCode: "app_state_mutation_claim",
+      },
+    ]);
   });
 
   it("allows structurally valid safe capability denials", async () => {

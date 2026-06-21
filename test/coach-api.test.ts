@@ -841,6 +841,10 @@ describe("DJ Lingo Coach API", () => {
       "assignedProvider",
       "actualExternalProvider",
       "fallbackCategory",
+      "providerErrorCategory",
+      "providerHttpStatus",
+      "responseValidationFailureCode",
+      "semanticSafetyFailureCode",
       "elapsedMs",
       "providerInvocationAttempted",
     ]);
@@ -857,6 +861,57 @@ describe("DJ Lingo Coach API", () => {
         String(entry).includes('"result":"provider_fallback"')
       )
     ).toBe(true);
+    fetchSpy.mockRestore();
+    consoleLog.mockRestore();
+  });
+
+  it("keeps unexpected non-provider fallback errors generic and sanitized", async () => {
+    const rawMessage = "RAW_UNEXPECTED_ERROR_MESSAGE_MUST_NOT_LEAK";
+    const rawStack = "RAW_UNEXPECTED_STACK_MUST_NOT_LEAK";
+    const consoleLog = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
+    const unexpectedError = new Error(rawMessage);
+    unexpectedError.stack = rawStack;
+    const providerResponse = new Response("ignored", { status: 200 });
+    vi.spyOn(providerResponse, "text").mockRejectedValue(unexpectedError);
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(providerResponse);
+    const response = await worker.fetch(
+      makeRequest(validRequest),
+      completeOpenAiEnv({
+        COACH_PROVIDER_RATE_LIMITER: {
+          async limit() {
+            return { success: true };
+          },
+        } as RateLimit,
+      })
+    );
+    const body = (await response.json()) as CoachApiSuccessResponseV1;
+    const serializedLogs = consoleLog.mock.calls
+      .map(([entry]) => String(entry))
+      .join("\n");
+    const event = JSON.parse(
+      String(consoleLog.mock.calls.at(-1)?.[0])
+    ) as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body.response.responseType).toBe("lesson_explanation");
+    expect(event).toMatchObject({
+      providerMode: "openai",
+      providerInvocationAttempted: true,
+      actualExternalProvider: "openai",
+      result: "provider_fallback",
+      fallbackCategory: "provider_fallback",
+    });
+    expect(event).not.toHaveProperty("providerErrorCategory");
+    expect(event).not.toHaveProperty("providerHttpStatus");
+    expect(event).not.toHaveProperty("responseValidationFailureCode");
+    expect(event).not.toHaveProperty("semanticSafetyFailureCode");
+    expect(serializedLogs).not.toContain(rawMessage);
+    expect(serializedLogs).not.toContain(rawStack);
+
     fetchSpy.mockRestore();
     consoleLog.mockRestore();
   });

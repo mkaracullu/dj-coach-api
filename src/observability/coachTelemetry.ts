@@ -6,8 +6,11 @@ import type {
 import type { ApiErrorCode } from "../http/ApiError";
 import type {
   CoachProviderId,
+  CoachProviderErrorCategory,
   CoachProviderMode,
 } from "../coach/providerTypes";
+import type { CoachResponseValidationFailureCode } from "../coach/coachResponseValidator";
+import type { CoachRuntimeSafetyFailureCode } from "../coach/coachRuntimeSafety";
 
 export type CoachTelemetryResultCategory =
   | "success"
@@ -37,6 +40,10 @@ export type CoachTelemetryEvent = {
   assignedProvider?: CoachProviderId;
   actualExternalProvider?: CoachProviderId;
   fallbackCategory?: "provider_fallback" | "semantic_safety_fallback";
+  providerErrorCategory?: CoachProviderErrorCategory;
+  providerHttpStatus?: number;
+  responseValidationFailureCode?: CoachResponseValidationFailureCode;
+  semanticSafetyFailureCode?: CoachRuntimeSafetyFailureCode;
 };
 
 export function emitCoachTelemetry(event: CoachTelemetryEvent): void {

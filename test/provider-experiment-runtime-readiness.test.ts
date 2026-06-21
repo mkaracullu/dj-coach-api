@@ -355,21 +355,33 @@ describe("provider experiment runtime readiness", () => {
         response?: Response;
         error?: Error;
         fallbackCategory: string;
+        expectedDiagnostics?: Record<string, unknown>;
       }> = [
         {
           name: "network",
           error: new Error("RAW_NETWORK_FAILURE"),
           fallbackCategory: "provider_fallback",
+          expectedDiagnostics: {
+            providerErrorCategory: "http_error",
+          },
         },
         {
           name: "HTTP",
           response: new Response("RAW_HTTP_FAILURE", { status: 503 }),
           fallbackCategory: "provider_fallback",
+          expectedDiagnostics: {
+            providerErrorCategory: "http_error",
+            providerHttpStatus: 503,
+          },
         },
         {
           name: "malformed provider envelope",
           response: Response.json({ unexpected: "RAW_PROVIDER_OUTPUT" }),
           fallbackCategory: "provider_fallback",
+          expectedDiagnostics: {
+            providerErrorCategory: "invalid_response",
+            providerHttpStatus: 200,
+          },
         },
         {
           name: "invalid structured output",
@@ -378,6 +390,11 @@ describe("provider experiment runtime readiness", () => {
             responseType: "unsupported_type",
           }),
           fallbackCategory: "provider_fallback",
+          expectedDiagnostics: {
+            providerErrorCategory: "invalid_structured_output",
+            providerHttpStatus: 200,
+            responseValidationFailureCode: "invalid_response_type",
+          },
         },
         {
           name: "semantic safety",
@@ -386,6 +403,11 @@ describe("provider experiment runtime readiness", () => {
             message: "I changed your progress and completed the lesson.",
           }),
           fallbackCategory: "semantic_safety_fallback",
+          expectedDiagnostics: {
+            providerErrorCategory: "invalid_structured_output",
+            providerHttpStatus: 200,
+            semanticSafetyFailureCode: "app_state_mutation_claim",
+          },
         },
       ];
 
@@ -422,6 +444,7 @@ describe("provider experiment runtime readiness", () => {
           providerInvocationAttempted: true,
           result: failure.fallbackCategory,
           fallbackCategory: failure.fallbackCategory,
+          ...failure.expectedDiagnostics,
         });
         expect(telemetry.serialized(), failure.name).not.toContain("RAW_");
 
@@ -474,6 +497,7 @@ describe("provider experiment runtime readiness", () => {
         providerInvocationAttempted: true,
         result: "provider_fallback",
         fallbackCategory: "provider_fallback",
+        providerErrorCategory: "timeout",
       });
       expect(telemetry.serialized()).not.toContain("RAW_TIMEOUT_FAILURE");
     }

@@ -13,15 +13,28 @@ import {
   type CoachProviderConfig,
   resolveCoachProviderConfig,
 } from "./providerConfig";
-import { CoachProviderError } from "./providerTypes";
+import {
+  CoachProviderError,
+  type CoachProviderErrorCategory,
+} from "./providerTypes";
+import type { CoachResponseValidationFailureCode } from "./coachResponseValidator";
+import type { CoachRuntimeSafetyFailureCode } from "./coachRuntimeSafety";
 
 export type CoachService = {
   respond(request: CoachApiRequestV1): Promise<unknown>;
 };
 
-export type CoachServiceFallbackResult =
+export type CoachServiceFallbackCategory =
   | "provider_fallback"
   | "semantic_safety_fallback";
+
+export type CoachServiceFallbackResult = {
+  category: CoachServiceFallbackCategory;
+  providerErrorCategory?: CoachProviderErrorCategory;
+  providerHttpStatus?: number;
+  responseValidationFailureCode?: CoachResponseValidationFailureCode;
+  semanticSafetyFailureCode?: CoachRuntimeSafetyFailureCode;
+};
 
 export const mockCoachService: CoachService = {
   async respond(request) {
@@ -33,6 +46,37 @@ export const mockCoachService: CoachService = {
   },
 };
 
+function buildFallbackResult(error: unknown): CoachServiceFallbackResult {
+  if (!(error instanceof CoachProviderError)) {
+    return { category: "provider_fallback" };
+  }
+
+  const diagnostics = error.diagnostics;
+
+  return {
+    category: diagnostics.semanticSafetyFailed
+      ? "semantic_safety_fallback"
+      : "provider_fallback",
+    providerErrorCategory: diagnostics.providerErrorCategory,
+    ...(typeof diagnostics.providerHttpStatus === "number" &&
+    Number.isFinite(diagnostics.providerHttpStatus)
+      ? { providerHttpStatus: diagnostics.providerHttpStatus }
+      : {}),
+    ...(diagnostics.responseValidationFailureCode
+      ? {
+          responseValidationFailureCode:
+            diagnostics.responseValidationFailureCode,
+        }
+      : {}),
+    ...(diagnostics.semanticSafetyFailureCode
+      ? {
+          semanticSafetyFailureCode:
+            diagnostics.semanticSafetyFailureCode,
+        }
+      : {}),
+  };
+}
+
 function withDeterministicFallback(
   primaryService: CoachService,
   onFallback?: (result: CoachServiceFallbackResult) => void
@@ -42,12 +86,7 @@ function withDeterministicFallback(
       try {
         return await primaryService.respond(request);
       } catch (error) {
-        onFallback?.(
-          error instanceof CoachProviderError &&
-              error.diagnostics.semanticSafetyFailed
-            ? "semantic_safety_fallback"
-            : "provider_fallback"
-        );
+        onFallback?.(buildFallbackResult(error));
         return mockCoachService.respond(request);
       }
     },

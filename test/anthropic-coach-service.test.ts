@@ -6,6 +6,7 @@ import {
 import {
   createConfiguredCoachService,
   getCoachApiResponse,
+  type CoachServiceFallbackResult,
 } from "../src/coach/coachService";
 import {
   resolveAnthropicMaxOutputTokens,
@@ -216,7 +217,7 @@ describe("Anthropic reference coach adapter", () => {
         rawPrompt: "RAW_PROMPT_MUST_NOT_LEAK",
       })
     );
-    const fallbackResults: string[] = [];
+    const fallbackResults: CoachServiceFallbackResult[] = [];
     const service = createConfiguredCoachService(
       {
         COACH_PROVIDER: "anthropic",
@@ -230,7 +231,14 @@ describe("Anthropic reference coach adapter", () => {
     const serializedResponse = JSON.stringify(response);
 
     expect(response.response.message).toContain("steady");
-    expect(fallbackResults).toEqual(["provider_fallback"]);
+    expect(fallbackResults).toEqual([
+      {
+        category: "provider_fallback",
+        providerErrorCategory: "invalid_structured_output",
+        providerHttpStatus: 200,
+        responseValidationFailureCode: "invalid_payload_shape",
+      },
+    ]);
     expect(serializedResponse).not.toContain(rawProviderOutput);
     expect(serializedResponse).not.toContain(apiKey);
     expect(serializedResponse).not.toContain("anthropic");
@@ -239,7 +247,7 @@ describe("Anthropic reference coach adapter", () => {
   });
 
   it("uses semantic-safety fallback for structurally valid unsafe text", async () => {
-    const fallbackResults: string[] = [];
+    const fallbackResults: CoachServiceFallbackResult[] = [];
     const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
       providerResponse({
         message: "I changed your progress and completed the lesson.",
@@ -260,7 +268,14 @@ describe("Anthropic reference coach adapter", () => {
     const response = await getCoachApiResponse(fixture.request, service);
 
     expect(response.response.message).toContain("steady");
-    expect(fallbackResults).toEqual(["semantic_safety_fallback"]);
+    expect(fallbackResults).toEqual([
+      {
+        category: "semantic_safety_fallback",
+        providerErrorCategory: "invalid_structured_output",
+        providerHttpStatus: 200,
+        semanticSafetyFailureCode: "app_state_mutation_claim",
+      },
+    ]);
   });
 
   it("keeps raw Anthropic failures out of evaluation reports", async () => {
@@ -385,4 +400,3 @@ it("does not scan later content blocks for structured output", async () => {
     },
   });
 });
-
