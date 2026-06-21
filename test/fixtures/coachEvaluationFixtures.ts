@@ -8,10 +8,17 @@ import type {
 
 export type EvaluationLanguage = "en" | "tr";
 
+export type CoachEvaluationQualityCheck =
+  | "turkish_coherence_repetition"
+  | "next_action_consistency"
+  | "deck_cue_accuracy"
+  | "session_7_instruction_specificity";
+
 export type CoachEvaluationExpectations = {
   language: EvaluationLanguage;
   expectedResponseTypes: readonly CoachResponseType[];
   requiredTerms: readonly string[];
+  qualityChecks?: readonly CoachEvaluationQualityCheck[];
   goalTerms?: readonly string[];
   requiresCapabilityHonesty?: boolean;
   promptInjection?: boolean;
@@ -100,6 +107,7 @@ export const coachEvaluationFixtures: readonly CoachEvaluationFixture[] = [
       language: "en",
       expectedResponseTypes: ["lesson_explanation"],
       requiredTerms: ["steady", "spacing", "pulse", "timing"],
+      qualityChecks: ["next_action_consistency"],
     },
   },
   {
@@ -117,6 +125,10 @@ export const coachEvaluationFixtures: readonly CoachEvaluationFixture[] = [
       language: "tr",
       expectedResponseTypes: ["concept_clarification"],
       requiredTerms: ["ritim", "vuruş", "tempo", "eşit"],
+      qualityChecks: [
+        "turkish_coherence_repetition",
+        "next_action_consistency",
+      ],
     },
   },
   {
@@ -134,6 +146,7 @@ export const coachEvaluationFixtures: readonly CoachEvaluationFixture[] = [
       language: "en",
       expectedResponseTypes: ["attempt_feedback"],
       requiredTerms: ["close", "count", "strong 1", "timing"],
+      qualityChecks: ["session_7_instruction_specificity"],
     },
   },
   {
@@ -151,6 +164,7 @@ export const coachEvaluationFixtures: readonly CoachEvaluationFixture[] = [
       language: "en",
       expectedResponseTypes: ["attempt_feedback"],
       requiredTerms: ["early", "wait", "timing"],
+      qualityChecks: ["session_7_instruction_specificity"],
     },
   },
   {
@@ -168,6 +182,7 @@ export const coachEvaluationFixtures: readonly CoachEvaluationFixture[] = [
       language: "en",
       expectedResponseTypes: ["attempt_feedback"],
       requiredTerms: ["late", "earlier", "strong 1"],
+      qualityChecks: ["session_7_instruction_specificity"],
     },
   },
   {
@@ -185,6 +200,7 @@ export const coachEvaluationFixtures: readonly CoachEvaluationFixture[] = [
       language: "en",
       expectedResponseTypes: ["setup_guidance", "capability_limit"],
       requiredTerms: ["controller", "play", "cue", "timing"],
+      qualityChecks: ["deck_cue_accuracy"],
       goalTerms: ["controller", "play", "cue"],
       requiresCapabilityHonesty: true,
     },

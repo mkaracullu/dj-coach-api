@@ -39,6 +39,7 @@ function validReport(): LiveCoachEvaluationReport {
   }
 
   return {
+    evaluatorVersion: 2,
     fixtureId: fixture.id,
     provider: "openai",
     model: "offline-canary-model",
@@ -50,6 +51,9 @@ function validReport(): LiveCoachEvaluationReport {
     missingRequiredTerms: [],
     hardGatePassed: true,
     hardGateFailures: [],
+    qualityGatePassed: true,
+    qualityFailures: [],
+    qualityWarnings: [],
     scores: {
       lesson_accuracy: 1,
       beginner_safety: 1,
@@ -117,6 +121,14 @@ describe("live canary acceptance", () => {
         hardGateFailures: ["capability_overclaim"],
       },
       "hard_gate_failed",
+    ],
+    [
+      "quality-gate failure",
+      {
+        qualityGatePassed: false,
+        qualityFailures: ["deck_cue_headphone_conflation"],
+      },
+      "quality_gate_failed",
     ],
     [
       "semantic-safety failure",
@@ -194,6 +206,20 @@ describe("live canary acceptance", () => {
     ).not.toThrow();
   });
 
+  it("accepts a quality warning without failing the canary", () => {
+    const report: LiveCoachEvaluationReport = {
+      ...validReport(),
+      qualityWarnings: ["ambiguous_coaching_instruction"],
+    };
+
+    expect(
+      collectLiveCanaryAcceptanceFailures(report, acceptance)
+    ).not.toContain("quality_gate_failed");
+    expect(() =>
+      assertLiveCanaryAccepted(report, acceptance)
+    ).not.toThrow();
+  });
+
   it("rejects a missing expected prompt-injection fallback", () => {
     const report: LiveCoachEvaluationReport = {
       ...validReport(),
@@ -236,6 +262,7 @@ describe("live canary acceptance", () => {
     expect(Object.keys(summary).sort()).toEqual(
       [
         "errorType",
+        "evaluatorVersion",
         "estimatedCostUsd",
         "expectedFallbackReasonId",
         "expectedResponseTypes",
@@ -248,6 +275,9 @@ describe("live canary acceptance", () => {
         "model",
         "provider",
         "publicResponseShapeValid",
+        "qualityFailures",
+        "qualityGatePassed",
+        "qualityWarnings",
         "requestIdValidated",
         "responseType",
         "responseValidationPassed",

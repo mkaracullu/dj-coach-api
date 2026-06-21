@@ -15,18 +15,35 @@ import {
 
 function buildCandidate(
   fixture: CoachEvaluationFixture,
-  message: string
+  message: string,
+  options: {
+    nextActionLabel?: string | null;
+    responseType?: string;
+    fallbackReasonId?: string | null;
+  } = {}
 ): unknown {
   return {
     contractVersion: 1,
     requestId: fixture.request.requestId,
     response: {
       message,
-      nextActionLabel: null,
-      responseType: "lesson_explanation",
-      fallbackReasonId: null,
+      nextActionLabel: options.nextActionLabel ?? null,
+      responseType: options.responseType ?? "lesson_explanation",
+      fallbackReasonId: options.fallbackReasonId ?? null,
     },
   };
+}
+
+function requireFixture(id: string): CoachEvaluationFixture {
+  const fixture = coachEvaluationFixtures.find(
+    (candidate) => candidate.id === id
+  );
+
+  if (fixture === undefined) {
+    throw new Error(`Missing coach evaluation fixture: ${id}`);
+  }
+
+  return fixture;
 }
 
 describe("provider-neutral coach evaluation harness", () => {
@@ -101,6 +118,8 @@ describe("provider-neutral coach evaluation harness", () => {
 
     expect(report.hardGatePassed).toBe(false);
     expect(report.hardGateFailures).toEqual(["invalid_structured_output"]);
+    expect(report.qualityGatePassed).toBe(false);
+    expect(report.qualityFailures).toEqual([]);
     expect(report.actualResponseType).toBeNull();
     expect(report.matchedRequiredTerms).toEqual([]);
     expect(report.missingRequiredTerms).toEqual(
@@ -158,6 +177,179 @@ describe("provider-neutral coach evaluation harness", () => {
     expect(englishReport.scores.turkish_quality).toBeNull();
     expect(turkishReport.scores.english_quality).toBeNull();
     expect(turkishReport.scores.turkish_quality).toBe(0);
+  });
+
+  it("fails Turkish quality for consecutive nonsense repetition without changing safety", () => {
+    const fixture = requireFixture("session-2-tap-pulse-tr");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Ritme dokun ve vuruşları eşit tut. pepe pepe pepe",
+        {
+          nextActionLabel: "4 vuruş boyunca dokun",
+          responseType: "concept_clarification",
+        }
+      )
+    );
+
+    expect(report.validStructuredOutput).toBe(true);
+    expect(report.hardGatePassed).toBe(true);
+    expect(report.hardGateFailures).toEqual([]);
+    expect(report.qualityGatePassed).toBe(false);
+    expect(report.qualityFailures).toEqual([
+      "nonsensical_language_repetition",
+    ]);
+    expect(report.scores.turkish_quality).toBe(0);
+  });
+
+  it("passes natural Turkish wording and numeric beat counting", () => {
+    const fixture = requireFixture("session-2-tap-pulse-tr");
+
+    for (const message of [
+      "Ritme parmağınla dokun ve vuruşları eşit aralıklarla sürdür.",
+      "Ritme dokun: 1 2 3 4, sonra aynı tempoda yeniden başla.",
+    ]) {
+      const report = evaluateCoachResponse(
+        fixture,
+        buildCandidate(fixture, message, {
+          nextActionLabel: "4 vuruş boyunca dokun",
+          responseType: "concept_clarification",
+        })
+      );
+
+      expect(report.qualityGatePassed, message).toBe(true);
+      expect(report.qualityFailures, message).toEqual([]);
+      expect(report.scores.turkish_quality, message).toBe(1);
+    }
+  });
+
+  it("fails controls lesson accuracy when deck Cue is presented as headphone preview", () => {
+    const fixture = requireFixture("goal-understand-controls");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "On your controller, Play starts the track. Cue lets you hear it in headphones before mixing, which helps timing.",
+        { responseType: "setup_guidance" }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(true);
+    expect(report.qualityGatePassed).toBe(false);
+    expect(report.qualityFailures).toEqual([
+      "deck_cue_headphone_conflation",
+    ]);
+    expect(report.scores.lesson_accuracy).toBe(0);
+  });
+
+  it.each([
+    "Deck Cue sets or returns to a cue point. Headphone Cue/PFL previews the channel in headphones.",
+    "Use deck Cue to return to your cue point, and use channel Cue for headphone preview.",
+  ])(
+    "passes controls accuracy for correct Cue roles: %s",
+    (message) => {
+      const fixture = requireFixture("goal-understand-controls");
+      const report = evaluateCoachResponse(
+        fixture,
+        buildCandidate(fixture, message, {
+          responseType: "setup_guidance",
+        })
+      );
+
+      expect(report.qualityGatePassed).toBe(true);
+      expect(report.qualityFailures).toEqual([]);
+      expect(report.scores.lesson_accuracy).toBe(1);
+    }
+  );
+
+  it("fails contradictory deck Cue headphone-preview wording", () => {
+    const fixture = requireFixture("goal-understand-controls");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Deck Cue lets you preview the track in headphones, and PFL is also available.",
+        { responseType: "setup_guidance" }
+      )
+    );
+
+    expect(report.qualityGatePassed).toBe(false);
+    expect(report.qualityFailures).toEqual([
+      "deck_cue_headphone_conflation",
+    ]);
+    expect(report.scores.lesson_accuracy).toBe(0);
+  });
+
+  it("warns when tapping guidance has a count-only next action", () => {
+    const fixture = requireFixture("session-2-tap-pulse-tr");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Ritme dokun ve her vuruşta parmağını eşit hareket ettir.",
+        {
+          nextActionLabel: "Sadece 4 vuruş say",
+          responseType: "concept_clarification",
+        }
+      )
+    );
+
+    expect(report.qualityGatePassed).toBe(true);
+    expect(report.qualityWarnings).toEqual(["next_action_mismatch"]);
+  });
+
+  it("accepts tapping guidance with a tapping next action", () => {
+    const fixture = requireFixture("session-2-tap-pulse-en");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Tap along with the pulse and keep each tap steady for timing.",
+        { nextActionLabel: "Tap along for 4 beats" }
+      )
+    );
+
+    expect(report.qualityGatePassed).toBe(true);
+    expect(report.qualityWarnings).toEqual([]);
+  });
+
+  it("warns for a bare Session 7 slow-down instruction", () => {
+    const fixture = requireFixture("session-7-close");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Your timing was close to the strong 1. Slow down.",
+        {
+          nextActionLabel: "Try again",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.qualityGatePassed).toBe(true);
+    expect(report.qualityWarnings).toEqual([
+      "ambiguous_coaching_instruction",
+    ]);
+  });
+
+  it("accepts a Session 7 instruction that identifies what to slow", () => {
+    const fixture = requireFixture("session-7-close");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Your timing was close. Slow your count and wait for the next strong 1.",
+        {
+          nextActionLabel: "Try the timing again",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.qualityGatePassed).toBe(true);
+    expect(report.qualityWarnings).toEqual([]);
   });
 
   it("runs fixtures through the provider-neutral evaluation runner", async () => {

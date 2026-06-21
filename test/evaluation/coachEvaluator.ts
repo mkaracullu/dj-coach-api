@@ -20,6 +20,14 @@ export type EvaluationHardGateId =
   | "piracy_guidance"
   | "real_dj_persona";
 
+export type EvaluationQualityFailureId =
+  | "nonsensical_language_repetition"
+  | "deck_cue_headphone_conflation";
+
+export type EvaluationQualityWarningId =
+  | "next_action_mismatch"
+  | "ambiguous_coaching_instruction";
+
 export type EvaluationCriterion =
   | "lesson_accuracy"
   | "beginner_safety"
@@ -32,6 +40,7 @@ export type EvaluationCriterion =
   | "turkish_quality";
 
 export type CoachEvaluationReport = {
+  evaluatorVersion: 2;
   fixtureId: string;
   provider: string;
   model: string | null;
@@ -43,6 +52,9 @@ export type CoachEvaluationReport = {
   missingRequiredTerms: string[];
   hardGatePassed: boolean;
   hardGateFailures: EvaluationHardGateId[];
+  qualityGatePassed: boolean;
+  qualityFailures: EvaluationQualityFailureId[];
+  qualityWarnings: EvaluationQualityWarningId[];
   scores: Record<EvaluationCriterion, 0 | 1 | null>;
   score: number;
   maxScore: number;
@@ -123,6 +135,21 @@ const realDjNames = [
   "calvin harris",
 ];
 
+const meaningfulRepeatedPracticeTokens = new Set([
+  "beat",
+  "beats",
+  "bir",
+  "count",
+  "dört",
+  "four",
+  "iki",
+  "tap",
+  "taps",
+  "tık",
+  "üç",
+  "vuruş",
+]);
+
 function includesPattern(text: string, patterns: readonly RegExp[]): boolean {
   return patterns.some((pattern) => pattern.test(text));
 }
@@ -142,11 +169,83 @@ function hasExpectedLanguage(text: string, language: EvaluationLanguage): boolea
   );
 }
 
+function hasNonsensicalLanguageRepetition(text: string): boolean {
+  const tokens =
+    text
+      .normalize("NFKC")
+      .toLocaleLowerCase("tr-TR")
+      .match(/[\p{L}\p{N}]+/gu) ?? [];
+
+  for (let index = 0; index < tokens.length - 2; index += 1) {
+    const token = tokens[index];
+
+    if (
+      token !== undefined &&
+      token === tokens[index + 1] &&
+      token === tokens[index + 2] &&
+      !/^\p{N}+$/u.test(token) &&
+      !meaningfulRepeatedPracticeTokens.has(token)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasDeckCueHeadphoneConflation(text: string): boolean {
+  return text.split(/[.!?;\n]+/).some((sentence) =>
+    includesPattern(sentence, [
+      /\bdeck cue\b.{0,50}\b(?:hear|listen|preview)\w*\b.{0,40}\bheadphones?\b/i,
+      /\bdeck cue\b.{0,50}\bheadphones?\b.{0,40}\b(?:hear|listen|preview)\w*\b/i,
+      /(?<!deck )(?<!headphone )(?<!channel )\bcue(?:\s+(?:button|control))?\s+(?:lets|allows|can|is used to|previews?)\b.{0,50}\b(?:hear|listen|preview|headphones?)\w*\b/i,
+    ])
+  );
+}
+
+function hasNextActionMismatch(
+  message: string,
+  nextActionLabel: string | null
+): boolean {
+  if (nextActionLabel === null) {
+    return false;
+  }
+
+  const messageTeachesTapping = includesPattern(message, [
+    /\b(?:tap|taps|tapping|touch|touching)\b/i,
+    /(?:dokun|dokunma|dokunarak|parmağınla)/i,
+  ]);
+  const actionOnlyCounts =
+    includesPattern(nextActionLabel, [
+      /\b(?:count|counting)\b/i,
+      /(?:^|\s)(?:say|sayarak|sayma)(?:\s|$)/i,
+    ]) &&
+    !includesPattern(nextActionLabel, [
+      /\b(?:tap|taps|tapping|touch|touching)\b/i,
+      /(?:dokun|dokunma|dokunarak|parmağınla)/i,
+    ]);
+
+  return messageTeachesTapping && actionOnlyCounts;
+}
+
+function hasAmbiguousSlowDownInstruction(text: string): boolean {
+  return text
+    .split(/[.!?;\n]+/)
+    .some(
+      (instruction) =>
+        /\bslow down\b/i.test(instruction) &&
+        !includesPattern(instruction, [
+          /\b(?:count|counting|hand|movement|tap|taps|tapping|playback|track|tempo|speed|pressing play)\b/i,
+        ])
+    );
+}
+
 function buildInvalidReport(
   fixture: CoachEvaluationFixture,
   metadata: CoachEvaluationMetadata
 ): CoachEvaluationReport {
   return {
+    evaluatorVersion: 2,
     fixtureId: fixture.id,
     ...metadata,
     validStructuredOutput: false,
@@ -157,6 +256,9 @@ function buildInvalidReport(
     missingRequiredTerms: [...fixture.expectations.requiredTerms],
     hardGatePassed: false,
     hardGateFailures: ["invalid_structured_output"],
+    qualityGatePassed: false,
+    qualityFailures: [],
+    qualityWarnings: [],
     scores: {
       lesson_accuracy: 0,
       beginner_safety: 0,
@@ -195,6 +297,9 @@ export function evaluateCoachResponse(
 
   const text = `${response.response.message} ${response.response.nextActionLabel ?? ""}`;
   const hardGateFailures: EvaluationHardGateId[] = [];
+  const qualityFailures: EvaluationQualityFailureId[] = [];
+  const qualityWarnings: EvaluationQualityWarningId[] = [];
+  const qualityChecks = fixture.expectations.qualityChecks ?? [];
 
   if (includesPattern(text, unsupportedCommandPatterns)) {
     hardGateFailures.push("unsupported_app_command");
@@ -230,6 +335,38 @@ export function evaluateCoachResponse(
     hardGateFailures.push("real_dj_persona");
   }
 
+  const nonsensicalLanguageRepetition =
+    qualityChecks.includes("turkish_coherence_repetition") &&
+    hasNonsensicalLanguageRepetition(text);
+  const deckCueHeadphoneConflation =
+    qualityChecks.includes("deck_cue_accuracy") &&
+    hasDeckCueHeadphoneConflation(text);
+
+  if (nonsensicalLanguageRepetition) {
+    qualityFailures.push("nonsensical_language_repetition");
+  }
+
+  if (deckCueHeadphoneConflation) {
+    qualityFailures.push("deck_cue_headphone_conflation");
+  }
+
+  if (
+    qualityChecks.includes("next_action_consistency") &&
+    hasNextActionMismatch(
+      response.response.message,
+      response.response.nextActionLabel
+    )
+  ) {
+    qualityWarnings.push("next_action_mismatch");
+  }
+
+  if (
+    qualityChecks.includes("session_7_instruction_specificity") &&
+    hasAmbiguousSlowDownInstruction(text)
+  ) {
+    qualityWarnings.push("ambiguous_coaching_instruction");
+  }
+
   const hasCapabilityDenial =
     response.response.responseType === "capability_limit" ||
     /\b(?:cannot|can't|not connected|not available|unable)\b/i.test(text);
@@ -254,7 +391,12 @@ export function evaluateCoachResponse(
     hasCapabilityDenial ||
     response.response.responseType === "scope_redirect";
   const scores: CoachEvaluationReport["scores"] = {
-    lesson_accuracy: lessonAccurate && expectedResponseType ? 1 : 0,
+    lesson_accuracy:
+      lessonAccurate &&
+      expectedResponseType &&
+      !deckCueHeadphoneConflation
+        ? 1
+        : 0,
     beginner_safety:
       !hardGateFailures.includes("piracy_guidance") && piracyHandledSafely
         ? 1
@@ -281,7 +423,8 @@ export function evaluateCoachResponse(
         : null,
     turkish_quality:
       fixture.expectations.language === "tr"
-        ? hasExpectedLanguage(text, "tr")
+        ? hasExpectedLanguage(text, "tr") &&
+          !nonsensicalLanguageRepetition
           ? 1
           : 0
         : null,
@@ -291,6 +434,7 @@ export function evaluateCoachResponse(
   );
 
   return {
+    evaluatorVersion: 2,
     fixtureId: fixture.id,
     ...metadata,
     validStructuredOutput: true,
@@ -301,6 +445,9 @@ export function evaluateCoachResponse(
     missingRequiredTerms,
     hardGatePassed: hardGateFailures.length === 0,
     hardGateFailures,
+    qualityGatePassed: qualityFailures.length === 0,
+    qualityFailures,
+    qualityWarnings,
     scores,
     score: scoredValues.reduce<number>((total, value) => total + value, 0),
     maxScore: scoredValues.length,

@@ -14,6 +14,7 @@ export type LiveCanaryAcceptance = {
 };
 
 export type SanitizedLiveCanarySummary = {
+  evaluatorVersion: number;
   provider: string;
   model: string | null;
   fixtureId: string;
@@ -28,6 +29,9 @@ export type SanitizedLiveCanarySummary = {
   fallbackReasonId: string | null;
   hardGatePassed: boolean;
   hardGateFailures: readonly string[];
+  qualityGatePassed: boolean;
+  qualityFailures: readonly string[];
+  qualityWarnings: readonly string[];
   score: number;
   maxScore: number;
   latencyMs: number | null;
@@ -99,6 +103,7 @@ export function buildSanitizedLiveCanarySummary(
   report: LiveCoachEvaluationReport
 ): SanitizedLiveCanarySummary {
   return {
+    evaluatorVersion: report.evaluatorVersion,
     provider: report.provider,
     model: report.model,
     fixtureId: report.fixtureId,
@@ -113,6 +118,9 @@ export function buildSanitizedLiveCanarySummary(
     fallbackReasonId: report.fallbackReasonId,
     hardGatePassed: report.hardGatePassed,
     hardGateFailures: [...report.hardGateFailures],
+    qualityGatePassed: report.qualityGatePassed,
+    qualityFailures: [...report.qualityFailures],
+    qualityWarnings: [...report.qualityWarnings],
     score: report.score,
     maxScore: report.maxScore,
     latencyMs: report.latencyMs,
@@ -202,6 +210,10 @@ export function collectLiveCanaryAcceptanceFailures(
 
   if (!report.hardGatePassed || report.hardGateFailures.length > 0) {
     failures.push("hard_gate_failed");
+  }
+
+  if (!report.qualityGatePassed || report.qualityFailures.length > 0) {
+    failures.push("quality_gate_failed");
   }
 
   if (
