@@ -3,13 +3,14 @@ import {
   coachRequestIdHeader,
   isValidCoachRequestId,
 } from "../contracts/CoachApiContract";
+import { coachExperimentCohortHeader } from "../coach/providerExperiment";
 import { ApiError, ApiErrorCode } from "./ApiError";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   "Access-Control-Allow-Headers":
-    `Accept, Content-Type, ${coachRequestIdHeader}`,
+    `Accept, Content-Type, ${coachRequestIdHeader}, ${coachExperimentCohortHeader}`,
   "Access-Control-Max-Age": "86400",
 } as const;
 

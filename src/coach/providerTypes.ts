@@ -5,7 +5,7 @@ import type { CoachRuntimeSafetyFailureCode } from "./coachRuntimeSafety";
 export const coachProviderIdValues = ["openai", "anthropic"] as const;
 
 export type CoachProviderId = (typeof coachProviderIdValues)[number];
-export type CoachProviderMode = "mock" | CoachProviderId;
+export type CoachProviderMode = "mock" | "experiment" | CoachProviderId;
 
 export type CoachProviderUsage = {
   inputTokens: number;

@@ -7,7 +7,7 @@ import {
 import {
   CoachService,
   CoachServiceFallbackResult,
-  createConfiguredCoachService,
+  createCoachServiceFromConfig,
   getCoachApiResponse,
 } from "./coach/coachService";
 import {
@@ -15,7 +15,15 @@ import {
   isExternalCoachProvider,
   resolveCoachProviderConfig,
 } from "./coach/providerConfig";
-import type { CoachProviderMode } from "./coach/providerTypes";
+import {
+  assignCoachExperimentProvider,
+  readCoachExperimentCohort,
+  resolveCoachExperimentConfig,
+} from "./coach/providerExperiment";
+import type {
+  CoachProviderId,
+  CoachProviderMode,
+} from "./coach/providerTypes";
 import { ApiError } from "./http/ApiError";
 import {
   apiError,
@@ -66,6 +74,11 @@ async function handleCoachRespond(
   let publicErrorType: ApiError["code"] | undefined;
   let fallbackReasonId: CoachFallbackReasonId | undefined;
   let providerInvocationAttempted = false;
+  let experimentId: string | undefined;
+  let experimentVersion: string | undefined;
+  let assignedProvider: CoachProviderId | undefined;
+  let actualExternalProvider: CoachProviderId | undefined;
+  let fallbackCategory: CoachServiceFallbackResult | undefined;
   let stage: "method" | "validation" | "scope" | "guardrail" | "service" =
     "method";
 
@@ -89,9 +102,30 @@ async function handleCoachRespond(
     validateCoachProductScope(coachRequest);
 
     stage = "guardrail";
-    const providerConfig = resolveCoachProviderConfig(env);
-    providerMode = providerConfig.provider;
     await enforceRequestRateLimit(request, env);
+
+    let providerConfig = resolveCoachProviderConfig(env);
+
+    if (env.COACH_PROVIDER === "experiment") {
+      providerMode = "experiment";
+      const experimentConfig = resolveCoachExperimentConfig(env);
+      const cohortId = readCoachExperimentCohort(request);
+
+      if (experimentConfig && cohortId) {
+        const assignment = await assignCoachExperimentProvider(
+          experimentConfig,
+          cohortId
+        );
+        experimentId = assignment.experimentId;
+        experimentVersion = assignment.experimentVersion;
+        assignedProvider = assignment.assignedProvider;
+        providerConfig = assignment.providerConfig;
+      } else {
+        providerConfig = { provider: "mock" };
+      }
+    } else {
+      providerMode = providerConfig.provider;
+    }
 
     if (isExternalCoachProvider(providerConfig.provider)) {
       await enforceProviderCallGuard(request, env, providerConfig.provider);
@@ -100,12 +134,16 @@ async function handleCoachRespond(
     let fallbackResult: CoachServiceFallbackResult | undefined;
     const service =
       coachService ??
-      createConfiguredCoachService(env, fetch, (fallback) => {
+      createCoachServiceFromConfig(providerConfig, fetch, (fallback) => {
         fallbackResult = fallback;
+        fallbackCategory = fallback;
       });
 
     stage = "service";
-    providerInvocationAttempted = isExternalCoachProvider(providerMode);
+    if (isExternalCoachProvider(providerConfig.provider)) {
+      providerInvocationAttempted = true;
+      actualExternalProvider = providerConfig.provider;
+    }
     const coachResponse = await getCoachApiResponse(coachRequest, service);
     fallbackReasonId = coachResponse.response.fallbackReasonId ?? undefined;
     result = fallbackResult ?? "success";
@@ -142,6 +180,11 @@ async function handleCoachRespond(
       ...(fallbackReasonId ? { fallbackReasonId } : {}),
       elapsedMs: Math.max(0, Date.now() - startedAt),
       providerInvocationAttempted,
+      ...(experimentId ? { experimentId } : {}),
+      ...(experimentVersion ? { experimentVersion } : {}),
+      ...(assignedProvider ? { assignedProvider } : {}),
+      ...(actualExternalProvider ? { actualExternalProvider } : {}),
+      ...(fallbackCategory ? { fallbackCategory } : {}),
     });
   }
 }

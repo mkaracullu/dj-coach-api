@@ -95,6 +95,25 @@ function completeAnthropicEnv(
   };
 }
 
+function completeExperimentEnv(
+  overrides: Partial<Env> = {}
+): Env {
+  return {
+    COACH_PROVIDER: "experiment",
+    COACH_EXPERIMENT_ENABLED: "true",
+    COACH_EXPERIMENT_ID: "provider_quality",
+    COACH_EXPERIMENT_VERSION: "v1",
+    COACH_EXPERIMENT_ASSIGNMENT_SECRET:
+      "test-only-assignment-secret-not-production",
+    COACH_EXPERIMENT_OPENAI_BPS: "10000",
+    OPENAI_API_KEY: "test-openai-key-not-real",
+    OPENAI_MODEL: "openai-reference-model",
+    ANTHROPIC_API_KEY: "test-anthropic-key-not-real",
+    ANTHROPIC_MODEL: "anthropic-reference-model",
+    ...overrides,
+  };
+}
+
 function openAiProviderResponse(output: unknown, extra: object = {}): Response {
   return Response.json({
     status: "completed",
@@ -112,6 +131,18 @@ function openAiProviderResponse(output: unknown, extra: object = {}): Response {
   });
 }
 
+function anthropicProviderResponse(output: unknown): Response {
+  return Response.json({
+    type: "message",
+    content: [{ type: "text", text: JSON.stringify(output) }],
+    stop_reason: "end_turn",
+    usage: {
+      input_tokens: 100,
+      output_tokens: 30,
+    },
+  });
+}
+
 describe("DJ Lingo Coach API", () => {
   it("allows only the required public request headers in CORS preflight", async () => {
     const response = await worker.fetch(
@@ -123,7 +154,7 @@ describe("DJ Lingo Coach API", () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get("Access-Control-Allow-Headers")).toBe(
-      "Accept, Content-Type, X-DJ-Request-Id"
+      "Accept, Content-Type, X-DJ-Request-Id, X-DJ-Experiment-Cohort"
     );
     expect(
       response.headers.get("Access-Control-Allow-Headers")
@@ -805,6 +836,11 @@ describe("DJ Lingo Coach API", () => {
       "result",
       "publicErrorType",
       "fallbackReasonId",
+      "experimentId",
+      "experimentVersion",
+      "assignedProvider",
+      "actualExternalProvider",
+      "fallbackCategory",
       "elapsedMs",
       "providerInvocationAttempted",
     ]);
@@ -883,6 +919,304 @@ describe("DJ Lingo Coach API", () => {
         message: "Coach service is temporarily unavailable.",
         requestId: "coach_test_1",
       },
+    });
+  });
+
+  describe("provider experiment routing", () => {
+    const cohortId = "123e4567-e89b-42d3-a456-426614174000";
+    const validProviderPayload = {
+      message: "Keep the pulse steady and leave equal space between taps.",
+      nextActionLabel: "Try one steady tap round.",
+      responseType: "lesson_explanation",
+      fallbackReasonId: null,
+    };
+
+    function experimentRequest(
+      body: unknown = validRequest,
+      headers: HeadersInit = {}
+    ) {
+      return makeRequest(body, {
+        "X-DJ-Experiment-Cohort": cohortId,
+        ...headers,
+      });
+    }
+
+    it("keeps mock mode authoritative even when a cohort header is present", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const response = await worker.fetch(experimentRequest(), {
+        ...completeExperimentEnv(),
+        COACH_PROVIDER: "mock",
+      });
+
+      expect(response.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it.each([
+      {
+        name: "missing experiment config",
+        env: completeExperimentEnv({
+          COACH_EXPERIMENT_ASSIGNMENT_SECRET: "",
+        }),
+        headers: {},
+      },
+      {
+        name: "invalid experiment config",
+        env: completeExperimentEnv({
+          COACH_EXPERIMENT_OPENAI_BPS: "10001",
+        }),
+        headers: {},
+      },
+      {
+        name: "incomplete assigned-provider configuration",
+        env: completeExperimentEnv({
+          ANTHROPIC_API_KEY: "",
+        }),
+        headers: {},
+      },
+      {
+        name: "missing cohort header",
+        env: completeExperimentEnv(),
+        headers: { "X-DJ-Experiment-Cohort": "" },
+      },
+      {
+        name: "malformed cohort header",
+        env: completeExperimentEnv(),
+        headers: { "X-DJ-Experiment-Cohort": "malformed" },
+      },
+      {
+        name: "oversized cohort header",
+        env: completeExperimentEnv(),
+        headers: { "X-DJ-Experiment-Cohort": "a".repeat(200) },
+      },
+    ])("uses mock for $name", async ({ env, headers }) => {
+      const providerLimit = vi.fn(async () => ({ success: true }));
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const response = await worker.fetch(
+        experimentRequest(validRequest, headers),
+        {
+          ...env,
+          COACH_PROVIDER_RATE_LIMITER: {
+            limit: providerLimit,
+          } as unknown as RateLimit,
+        }
+      );
+
+      expect(response.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(providerLimit).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it.each([
+      {
+        name: "OpenAI",
+        openAiBasisPoints: "10000",
+        expectedProvider: "openai",
+        expectedUrl: "https://api.openai.com/v1/responses",
+        response: openAiProviderResponse(validProviderPayload),
+      },
+      {
+        name: "Anthropic",
+        openAiBasisPoints: "0",
+        expectedProvider: "anthropic",
+        expectedUrl: "https://api.anthropic.com/v1/messages",
+        response: anthropicProviderResponse(validProviderPayload),
+      },
+    ])(
+      "invokes only assigned $name and keeps the public body provider-neutral",
+      async ({
+        openAiBasisPoints,
+        expectedProvider,
+        expectedUrl,
+        response: providerResponse,
+      }) => {
+        const providerLimit = vi.fn(async () => ({ success: true }));
+        const fetchSpy = vi
+          .spyOn(globalThis, "fetch")
+          .mockResolvedValue(providerResponse);
+        const response = await worker.fetch(
+          experimentRequest(validRequest, {
+            "X-DJ-Provider": expectedProvider === "openai"
+              ? "anthropic"
+              : "openai",
+          }),
+          completeExperimentEnv({
+            COACH_EXPERIMENT_OPENAI_BPS: openAiBasisPoints,
+            COACH_PROVIDER_RATE_LIMITER: {
+              limit: providerLimit,
+            } as unknown as RateLimit,
+          })
+        );
+        const body = (await response.json()) as Record<string, unknown>;
+
+        expect(response.status).toBe(200);
+        expect(fetchSpy).toHaveBeenCalledTimes(1);
+        expect(fetchSpy.mock.calls[0]?.[0]).toBe(expectedUrl);
+        expect(providerLimit).toHaveBeenCalledWith({
+          key: `coach-provider:${expectedProvider}:anonymous`,
+        });
+        expect(Object.keys(body)).toEqual([
+          "contractVersion",
+          "requestId",
+          "response",
+        ]);
+        expect(JSON.stringify(body)).not.toContain(expectedProvider);
+        fetchSpy.mockRestore();
+      }
+    );
+
+    it("does not cross over when the assigned provider fails", async () => {
+      const consoleLog = vi
+        .spyOn(console, "log")
+        .mockImplementation(() => undefined);
+      const providerLimit = vi.fn(async () => ({ success: true }));
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("assigned provider unavailable"));
+      const response = await worker.fetch(
+        experimentRequest(),
+        completeExperimentEnv({
+          COACH_EXPERIMENT_OPENAI_BPS: "10000",
+          COACH_PROVIDER_RATE_LIMITER: {
+            limit: providerLimit,
+          } as unknown as RateLimit,
+        })
+      );
+      const body = (await response.json()) as CoachApiSuccessResponseV1;
+
+      expect(response.status).toBe(200);
+      expect(body.response.message).toContain("steady");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+        "https://api.openai.com/v1/responses"
+      );
+      expect(
+        consoleLog.mock.calls.some(([entry]) =>
+          String(entry).includes(
+            '"assignedProvider":"openai"'
+          )
+        )
+      ).toBe(true);
+      expect(
+        consoleLog.mock.calls.some(([entry]) =>
+          String(entry).includes(
+            '"fallbackCategory":"provider_fallback"'
+          )
+        )
+      ).toBe(true);
+      fetchSpy.mockRestore();
+      consoleLog.mockRestore();
+    });
+
+    it("blocks the assigned provider before invocation", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const response = await worker.fetch(
+        experimentRequest(),
+        completeExperimentEnv({
+          COACH_PROVIDER_RATE_LIMITER: {
+            async limit() {
+              return { success: false };
+            },
+          } as RateLimit,
+        })
+      );
+
+      expect(response.status).toBe(429);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("rejects product scope before experiment routing or guardrails", async () => {
+      const requestLimit = vi.fn(async () => ({ success: true }));
+      const providerLimit = vi.fn(async () => ({ success: true }));
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const response = await worker.fetch(
+        experimentRequest({
+          ...validRequest,
+          question: {
+            source: "free_text",
+            question: "Do not route this request.",
+          },
+        }),
+        completeExperimentEnv({
+          COACH_RATE_LIMITER: {
+            limit: requestLimit,
+          } as unknown as RateLimit,
+          COACH_PROVIDER_RATE_LIMITER: {
+            limit: providerLimit,
+          } as unknown as RateLimit,
+        })
+      );
+
+      expect(response.status).toBe(400);
+      expect(requestLimit).not.toHaveBeenCalled();
+      expect(providerLimit).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    });
+
+    it("never exposes the cohort in provider requests, telemetry, or responses", async () => {
+      const consoleLog = vi
+        .spyOn(console, "log")
+        .mockImplementation(() => undefined);
+      const providerLimit = vi.fn(async () => ({ success: true }));
+      const fetchSpy = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValue(openAiProviderResponse(validProviderPayload));
+      const response = await worker.fetch(
+        experimentRequest(),
+        completeExperimentEnv({
+          COACH_PROVIDER_RATE_LIMITER: {
+            limit: providerLimit,
+          } as unknown as RateLimit,
+        })
+      );
+      const body = await response.text();
+      const providerRequest = JSON.stringify(fetchSpy.mock.calls);
+      const logs = consoleLog.mock.calls
+        .map(([entry]) => String(entry))
+        .join("\n");
+
+      expect(response.status).toBe(200);
+      expect(body).not.toContain(cohortId);
+      expect(providerRequest).not.toContain(cohortId);
+      expect(logs).not.toContain(cohortId);
+
+      const event = JSON.parse(
+        String(consoleLog.mock.calls.at(-1)?.[0])
+      ) as Record<string, unknown>;
+      expect(event).toMatchObject({
+        providerMode: "experiment",
+        experimentId: "provider_quality",
+        experimentVersion: "v1",
+        assignedProvider: "openai",
+        actualExternalProvider: "openai",
+        providerInvocationAttempted: true,
+        result: "success",
+      });
+      expect(Object.keys(event).sort()).toEqual(
+        [
+          "actualExternalProvider",
+          "assignedProvider",
+          "elapsedMs",
+          "event",
+          "experimentId",
+          "experimentVersion",
+          "providerInvocationAttempted",
+          "providerMode",
+          "requestId",
+          "result",
+          "route",
+          "sessionNumber",
+          "suggestedQuestionId",
+          "questionSource",
+        ].sort()
+      );
+
+      fetchSpy.mockRestore();
+      consoleLog.mockRestore();
     });
   });
 });

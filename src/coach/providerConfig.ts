@@ -1,5 +1,8 @@
 import { coachApiLimits } from "../contracts/CoachApiContract";
-import type { CoachProviderMode } from "./providerTypes";
+import type {
+  CoachProviderId,
+  CoachProviderMode,
+} from "./providerTypes";
 
 export type CoachProviderEnvironment = {
   COACH_PROVIDER?: string;
@@ -9,6 +12,11 @@ export type CoachProviderEnvironment = {
   ANTHROPIC_API_KEY?: string;
   ANTHROPIC_MODEL?: string;
   ANTHROPIC_MAX_OUTPUT_TOKENS?: string;
+  COACH_EXPERIMENT_ENABLED?: string;
+  COACH_EXPERIMENT_ID?: string;
+  COACH_EXPERIMENT_VERSION?: string;
+  COACH_EXPERIMENT_ASSIGNMENT_SECRET?: string;
+  COACH_EXPERIMENT_OPENAI_BPS?: string;
 };
 
 export type OpenAiCoachConfig = {
@@ -34,8 +42,8 @@ export type CoachProviderConfig =
 
 export function isExternalCoachProvider(
   provider: CoachProviderMode
-): provider is Exclude<CoachProviderMode, "mock"> {
-  return provider !== "mock";
+): provider is CoachProviderId {
+  return provider === "openai" || provider === "anthropic";
 }
 
 const defaultOpenAiMaxOutputTokens = 600;
@@ -119,4 +127,39 @@ export function resolveCoachProviderConfig(
   }
 
   return { provider: "mock" };
+}
+
+export function resolveExternalCoachProviderConfig(
+  env: CoachProviderEnvironment,
+  provider: CoachProviderId
+): OpenAiCoachConfig | AnthropicCoachConfig | undefined {
+  if (provider === "openai") {
+    if (!env.OPENAI_API_KEY || !env.OPENAI_MODEL) {
+      return undefined;
+    }
+
+    return {
+      provider: "openai",
+      apiKey: env.OPENAI_API_KEY,
+      model: env.OPENAI_MODEL,
+      timeoutMs: coachApiLimits.backendProviderTimeoutMs,
+      maxOutputTokens: resolveOpenAiMaxOutputTokens(
+        env.OPENAI_MAX_OUTPUT_TOKENS
+      ),
+    };
+  }
+
+  if (!env.ANTHROPIC_API_KEY || !env.ANTHROPIC_MODEL) {
+    return undefined;
+  }
+
+  return {
+    provider: "anthropic",
+    apiKey: env.ANTHROPIC_API_KEY,
+    model: env.ANTHROPIC_MODEL,
+    timeoutMs: coachApiLimits.backendProviderTimeoutMs,
+    maxOutputTokens: resolveAnthropicMaxOutputTokens(
+      env.ANTHROPIC_MAX_OUTPUT_TOKENS
+    ),
+  };
 }

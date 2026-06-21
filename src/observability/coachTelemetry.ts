@@ -4,7 +4,10 @@ import type {
   CoachSuggestedQuestionId,
 } from "../contracts/CoachApiContract";
 import type { ApiErrorCode } from "../http/ApiError";
-import type { CoachProviderMode } from "../coach/providerTypes";
+import type {
+  CoachProviderId,
+  CoachProviderMode,
+} from "../coach/providerTypes";
 
 export type CoachTelemetryResultCategory =
   | "success"
@@ -29,6 +32,11 @@ export type CoachTelemetryEvent = {
   fallbackReasonId?: CoachFallbackReasonId;
   elapsedMs: number;
   providerInvocationAttempted: boolean;
+  experimentId?: string;
+  experimentVersion?: string;
+  assignedProvider?: CoachProviderId;
+  actualExternalProvider?: CoachProviderId;
+  fallbackCategory?: "provider_fallback" | "semantic_safety_fallback";
 };
 
 export function emitCoachTelemetry(event: CoachTelemetryEvent): void {

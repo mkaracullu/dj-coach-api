@@ -10,6 +10,7 @@ import { validateCoachRuntimeSemanticSafety } from "./coachRuntimeSafety";
 import { OpenAiCoachService } from "./openAiCoachService";
 import {
   CoachProviderEnvironment,
+  type CoachProviderConfig,
   resolveCoachProviderConfig,
 } from "./providerConfig";
 import { CoachProviderError } from "./providerTypes";
@@ -59,7 +60,18 @@ export function createConfiguredCoachService(
   onFallback?: (result: CoachServiceFallbackResult) => void
 ): CoachService {
   const config = resolveCoachProviderConfig(env);
+  return createCoachServiceFromConfig(
+    config,
+    fetchImplementation,
+    onFallback
+  );
+}
 
+export function createCoachServiceFromConfig(
+  config: CoachProviderConfig,
+  fetchImplementation: typeof fetch = fetch,
+  onFallback?: (result: CoachServiceFallbackResult) => void
+): CoachService {
   if (config.provider === "mock") {
     return mockCoachService;
   }
