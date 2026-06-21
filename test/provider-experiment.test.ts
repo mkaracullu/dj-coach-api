@@ -144,4 +144,34 @@ describe("provider experiment assignment", () => {
       assignCoachExperimentProvider(allAnthropic, cohortId)
     ).resolves.toMatchObject({ assignedProvider: "anthropic" });
   });
+
+  it("supports both variants at an intermediate allocation", async () => {
+    const config = resolveCoachExperimentConfig(completeExperimentEnv())!;
+    const syntheticCohorts = Array.from(
+      { length: 32 },
+      (_, index) =>
+        `00000000-0000-4000-8000-${index.toString().padStart(12, "0")}`
+    );
+    const assignments = await Promise.all(
+      syntheticCohorts.map((syntheticCohort) =>
+        assignCoachExperimentProvider(config, syntheticCohort)
+      )
+    );
+
+    expect(new Set(assignments.map(({ assignedProvider }) => assignedProvider)))
+      .toEqual(new Set(["openai", "anthropic"]));
+    expect(
+      assignments.every(
+        ({ assignmentBucket }) =>
+          assignmentBucket >= 0 && assignmentBucket < 10_000
+      )
+    ).toBe(true);
+    expect(
+      assignments.every(
+        ({ assignedProvider, assignmentBucket }) =>
+          assignedProvider ===
+          (assignmentBucket < 5_000 ? "openai" : "anthropic")
+      )
+    ).toBe(true);
+  });
 });
