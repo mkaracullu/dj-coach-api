@@ -1,14 +1,12 @@
-import {
-  CoachApiRequestV1,
-} from "../contracts/CoachApiContract";
+import type { CoachApiRequestV1 } from "../contracts/CoachApiContract";
 import type { CoachService } from "./coachService";
+import { buildCoachPrompt } from "./coachPrompt";
+import type { AnthropicCoachConfig } from "./providerConfig";
 import {
   coachResponsePayloadSchema,
   isPlainObject,
   validateProviderPayload,
 } from "./providerResponse";
-import { buildCoachPrompt } from "./coachPrompt";
-import type { OpenAiCoachConfig } from "./providerConfig";
 import {
   buildCoachProviderSafeDiagnostics,
   CoachProviderError,
@@ -18,87 +16,51 @@ import {
   type CoachProviderUsage,
 } from "./providerTypes";
 
-const openAiResponsesEndpoint = "https://api.openai.com/v1/responses";
+const anthropicMessagesEndpoint = "https://api.anthropic.com/v1/messages";
+const anthropicApiVersion = "2023-06-01";
 const maximumProviderResponseBytes = 64 * 1024;
 
-export type OpenAiProviderUsage = CoachProviderUsage;
-export type OpenAiCoachResult = CoachProviderResult<"openai">;
-export type OpenAiProviderErrorType = CoachProviderErrorCategory;
-export type OpenAiSafeDiagnostics = CoachProviderSafeDiagnostics;
+export type AnthropicProviderUsage = CoachProviderUsage;
+export type AnthropicCoachResult = CoachProviderResult<"anthropic">;
+export type AnthropicProviderErrorType = CoachProviderErrorCategory;
+export type AnthropicSafeDiagnostics = CoachProviderSafeDiagnostics;
 
-export class OpenAiProviderError extends CoachProviderError {
+export class AnthropicProviderError extends CoachProviderError {
   constructor(
-    readonly errorType: OpenAiProviderErrorType,
+    readonly errorType: AnthropicProviderErrorType,
     message: string,
-    diagnostics: OpenAiSafeDiagnostics =
+    diagnostics: AnthropicSafeDiagnostics =
       buildCoachProviderSafeDiagnostics(errorType)
   ) {
-    super("openai", errorType, message, diagnostics);
-    this.name = "OpenAiProviderError";
+    super("anthropic", errorType, message, diagnostics);
+    this.name = "AnthropicProviderError";
   }
 }
 
 type FetchImplementation = typeof fetch;
 
-function readUsage(value: Record<string, unknown>): OpenAiProviderUsage | null {
+function readUsage(
+  value: Record<string, unknown>
+): AnthropicProviderUsage | null {
   if (!isPlainObject(value.usage)) {
     return null;
   }
 
   const inputTokens = value.usage.input_tokens;
   const outputTokens = value.usage.output_tokens;
-  const totalTokens = value.usage.total_tokens;
 
   if (
     typeof inputTokens !== "number" ||
-    typeof outputTokens !== "number" ||
-    typeof totalTokens !== "number"
+    typeof outputTokens !== "number"
   ) {
     return null;
   }
 
-  return { inputTokens, outputTokens, totalTokens };
-}
-
-function readOutputText(
-  value: Record<string, unknown>,
-  providerHttpStatus: number
-): string {
-  if (!Array.isArray(value.output)) {
-    throw new OpenAiProviderError(
-      "invalid_response",
-      "Provider response output is missing.",
-      buildCoachProviderSafeDiagnostics("invalid_response", {
-        providerHttpStatus,
-        schemaExtractionFailed: true,
-      })
-    );
-  }
-
-  for (const item of value.output) {
-    if (!isPlainObject(item) || !Array.isArray(item.content)) {
-      continue;
-    }
-
-    for (const content of item.content) {
-      if (
-        isPlainObject(content) &&
-        content.type === "output_text" &&
-        typeof content.text === "string"
-      ) {
-        return content.text;
-      }
-    }
-  }
-
-  throw new OpenAiProviderError(
-    "invalid_response",
-    "Provider response did not contain structured text.",
-    buildCoachProviderSafeDiagnostics("invalid_response", {
-      providerHttpStatus,
-      schemaExtractionFailed: true,
-    })
-  );
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: inputTokens + outputTokens,
+  };
 }
 
 function parseProviderResponse(
@@ -110,7 +72,7 @@ function parseProviderResponse(
   try {
     parsed = JSON.parse(rawBody);
   } catch {
-    throw new OpenAiProviderError(
+    throw new AnthropicProviderError(
       "invalid_response",
       "Provider response was not valid JSON.",
       buildCoachProviderSafeDiagnostics("invalid_response", {
@@ -120,8 +82,13 @@ function parseProviderResponse(
     );
   }
 
-  if (!isPlainObject(parsed) || parsed.status !== "completed") {
-    throw new OpenAiProviderError(
+  if (
+    !isPlainObject(parsed) ||
+    parsed.type !== "message" ||
+    (parsed.stop_reason !== "end_turn" &&
+      parsed.stop_reason !== "stop_sequence")
+  ) {
+    throw new AnthropicProviderError(
       "invalid_response",
       "Provider response did not complete.",
       buildCoachProviderSafeDiagnostics("invalid_response", {
@@ -133,9 +100,44 @@ function parseProviderResponse(
   return parsed;
 }
 
-export class OpenAiCoachService implements CoachService {
+function readOutputText(
+  value: Record<string, unknown>,
+  providerHttpStatus: number
+): string {
+  if (!Array.isArray(value.content)) {
+    throw new AnthropicProviderError(
+      "invalid_response",
+      "Provider response content is missing.",
+      buildCoachProviderSafeDiagnostics("invalid_response", {
+        providerHttpStatus,
+        schemaExtractionFailed: true,
+      })
+    );
+  }
+
+  const firstContent = value.content[0];
+
+  if (
+    !isPlainObject(firstContent) ||
+    firstContent.type !== "text" ||
+    typeof firstContent.text !== "string"
+  ) {
+    throw new AnthropicProviderError(
+      "invalid_response",
+      "Provider response did not contain structured text.",
+      buildCoachProviderSafeDiagnostics("invalid_response", {
+        providerHttpStatus,
+        schemaExtractionFailed: true,
+      })
+    );
+  }
+
+  return firstContent.text;
+}
+
+export class AnthropicCoachService implements CoachService {
   constructor(
-    private readonly config: OpenAiCoachConfig,
+    private readonly config: AnthropicCoachConfig,
     private readonly fetchImplementation: FetchImplementation = fetch
   ) {}
 
@@ -145,7 +147,7 @@ export class OpenAiCoachService implements CoachService {
 
   async respondWithMetadata(
     request: CoachApiRequestV1
-  ): Promise<OpenAiCoachResult> {
+  ): Promise<AnthropicCoachResult> {
     const prompt = buildCoachPrompt(request);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
@@ -153,48 +155,53 @@ export class OpenAiCoachService implements CoachService {
     let providerResponse: Response;
 
     try {
-      providerResponse = await this.fetchImplementation(openAiResponsesEndpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.config.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.config.model,
-          instructions: prompt.instructions,
-          input: prompt.input,
-          max_output_tokens: this.config.maxOutputTokens,
-          store: false,
-          text: {
-            verbosity: "low",
-            format: {
-              type: "json_schema",
-              name: "dj_lingo_coach_response",
-              strict: true,
-              schema: coachResponsePayloadSchema,
+      providerResponse = await this.fetchImplementation(
+        anthropicMessagesEndpoint,
+        {
+          method: "POST",
+          headers: {
+            "x-api-key": this.config.apiKey,
+            "anthropic-version": anthropicApiVersion,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: this.config.model,
+            max_tokens: this.config.maxOutputTokens,
+            system: prompt.instructions,
+            messages: [
+              {
+                role: "user",
+                content: prompt.input,
+              },
+            ],
+            output_config: {
+              format: {
+                type: "json_schema",
+                schema: coachResponsePayloadSchema,
+              },
             },
-          },
-          reasoning: {
-            effort: "low",
-          },
-        }),
-        signal: controller.signal,
-      });
-    } catch (error) {
+          }),
+          signal: controller.signal,
+        }
+      );
+    } catch {
       if (controller.signal.aborted) {
-        throw new OpenAiProviderError("timeout", "Provider request timed out.");
+        throw new AnthropicProviderError(
+          "timeout",
+          "Provider request timed out."
+        );
       }
 
-      throw new OpenAiProviderError(
+      throw new AnthropicProviderError(
         "http_error",
-        error instanceof Error ? error.message : "Provider request failed."
+        "Provider request failed."
       );
     } finally {
       clearTimeout(timeout);
     }
 
     if (!providerResponse.ok) {
-      throw new OpenAiProviderError(
+      throw new AnthropicProviderError(
         "http_error",
         `Provider returned HTTP ${providerResponse.status}.`,
         buildCoachProviderSafeDiagnostics("http_error", {
@@ -209,7 +216,7 @@ export class OpenAiCoachService implements CoachService {
       declaredLength !== null &&
       Number.parseInt(declaredLength, 10) > maximumProviderResponseBytes
     ) {
-      throw new OpenAiProviderError(
+      throw new AnthropicProviderError(
         "invalid_response",
         "Provider response was too large.",
         buildCoachProviderSafeDiagnostics("invalid_response", {
@@ -224,7 +231,7 @@ export class OpenAiCoachService implements CoachService {
       new TextEncoder().encode(rawBody).byteLength >
       maximumProviderResponseBytes
     ) {
-      throw new OpenAiProviderError(
+      throw new AnthropicProviderError(
         "invalid_response",
         "Provider response was too large.",
         buildCoachProviderSafeDiagnostics("invalid_response", {
@@ -246,7 +253,7 @@ export class OpenAiCoachService implements CoachService {
     try {
       payload = JSON.parse(outputText);
     } catch {
-      throw new OpenAiProviderError(
+      throw new AnthropicProviderError(
         "invalid_structured_output",
         "Provider structured output was not valid JSON.",
         buildCoachProviderSafeDiagnostics("invalid_structured_output", {
@@ -261,12 +268,12 @@ export class OpenAiCoachService implements CoachService {
       request.requestId,
       providerResponse.status,
       (errorType, message, diagnostics) =>
-        new OpenAiProviderError(errorType, message, diagnostics)
+        new AnthropicProviderError(errorType, message, diagnostics)
     );
 
     return {
       response: validatedResponse,
-      provider: "openai",
+      provider: "anthropic",
       model: this.config.model,
       latencyMs: Date.now() - startedAt,
       usage: readUsage(parsedResponse),

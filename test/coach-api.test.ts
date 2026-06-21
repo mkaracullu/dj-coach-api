@@ -84,6 +84,17 @@ function completeOpenAiEnv(
   };
 }
 
+function completeAnthropicEnv(
+  overrides: Partial<Env> = {}
+): Env {
+  return {
+    COACH_PROVIDER: "anthropic",
+    ANTHROPIC_API_KEY: "test-anthropic-key-not-real",
+    ANTHROPIC_MODEL: "claude-reference-model",
+    ...overrides,
+  };
+}
+
 function openAiProviderResponse(output: unknown, extra: object = {}): Response {
   return Response.json({
     status: "completed",
@@ -165,11 +176,41 @@ describe("DJ Lingo Coach API", () => {
     fetchSpy.mockRestore();
   });
 
+  it("does not call Anthropic unless provider configuration is explicitly complete", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const response = await worker.fetch(makeRequest(validRequest), {
+      COACH_PROVIDER: "anthropic",
+      ANTHROPIC_MODEL: "claude-reference-model",
+    });
+
+    expect(response.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
   it("fails closed before OpenAI invocation when the provider guardrail is missing", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     const response = await worker.fetch(
       makeRequest(validRequest),
       completeOpenAiEnv()
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "provider_guardrail_blocked",
+        message: "Coach service is temporarily unavailable.",
+      },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("fails closed before Anthropic invocation when the provider guardrail is missing", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const response = await worker.fetch(
+      makeRequest(validRequest),
+      completeAnthropicEnv()
     );
 
     expect(response.status).toBe(503);
@@ -217,6 +258,64 @@ describe("DJ Lingo Coach API", () => {
           code: "provider_guardrail_blocked",
         },
       });
+      expect(fetchSpy).not.toHaveBeenCalled();
+      fetchSpy.mockRestore();
+    }
+  );
+
+  it.each([
+    {
+      name: "free text",
+      body: {
+        ...validRequest,
+        question: {
+          source: "free_text",
+          question: "CLAUDE_SCOPE_REJECT_MUST_NOT_REACH_PROVIDER",
+        },
+      },
+    },
+    {
+      name: "an unsupported session",
+      body: {
+        ...validRequest,
+        context: {
+          ...validRequest.context,
+          lesson: {
+            ...validRequest.context.lesson,
+            sessionNumber: 3,
+          },
+        },
+      },
+    },
+    {
+      name: "an unsupported suggested question",
+      body: {
+        ...validRequest,
+        question: {
+          source: "suggested",
+          suggestedQuestionId: "explain_timing_result",
+        },
+      },
+    },
+  ])(
+    "rejects $name before Anthropic guardrails or provider invocation",
+    async ({ body }) => {
+      const requestLimit = vi.fn(async () => ({ success: true }));
+      const providerLimit = vi.fn(async () => ({ success: true }));
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const response = await worker.fetch(
+        makeRequest(body),
+        completeAnthropicEnv({
+          COACH_RATE_LIMITER: { limit: requestLimit } as unknown as RateLimit,
+          COACH_PROVIDER_RATE_LIMITER: {
+            limit: providerLimit,
+          } as unknown as RateLimit,
+        })
+      );
+
+      expect(response.status).toBe(400);
+      expect(requestLimit).not.toHaveBeenCalled();
+      expect(providerLimit).not.toHaveBeenCalled();
       expect(fetchSpy).not.toHaveBeenCalled();
       fetchSpy.mockRestore();
     }
@@ -532,6 +631,32 @@ describe("DJ Lingo Coach API", () => {
       error: {
         code: "rate_limited",
       },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it("returns 429 without calling Anthropic when the provider limiter rejects", async () => {
+    const providerLimit = vi.fn(async () => ({ success: false }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const response = await worker.fetch(
+      makeRequest(validRequest),
+      completeAnthropicEnv({
+        COACH_PROVIDER_RATE_LIMITER: {
+          limit: providerLimit,
+        } as unknown as RateLimit,
+      })
+    );
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "rate_limited",
+      },
+    });
+    expect(providerLimit).toHaveBeenCalledWith({
+      key: "coach-provider:anthropic:anonymous",
     });
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();

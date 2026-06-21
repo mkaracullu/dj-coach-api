@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval:openai": "vitest run test/openai-live-evaluation.test.ts",
+    "eval:anthropic": "vitest run test/anthropic-live-evaluation.test.ts",
     "test:watch": "vitest",
     "cf-typegen": "wrangler types"
   },

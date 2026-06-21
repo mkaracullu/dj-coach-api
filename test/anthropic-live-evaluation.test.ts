@@ -1,15 +1,11 @@
 import { describe, expect, it } from "vitest";
-import {
-  OpenAiCoachService,
-} from "../src/coach/openAiCoachService";
-import { resolveOpenAiMaxOutputTokens } from "../src/coach/providerConfig";
-import {
-  isSafePublicTextPreviewEnabled,
-} from "./evaluation/safePublicPreview";
-import { selectCoachEvaluationFixtures } from "./evaluation/selectCoachEvaluationFixtures";
+import { AnthropicCoachService } from "../src/coach/anthropicCoachService";
+import { resolveAnthropicMaxOutputTokens } from "../src/coach/providerConfig";
 import { estimateTokenUsageCostUsd } from "./evaluation/estimateUsageCost";
 import { isLiveEvaluationEnabled } from "./evaluation/liveEvaluationConfig";
 import { runLiveCoachEvaluation } from "./evaluation/runLiveCoachEvaluation";
+import { isSafePublicTextPreviewEnabled } from "./evaluation/safePublicPreview";
+import { selectCoachEvaluationFixtures } from "./evaluation/selectCoachEvaluationFixtures";
 import { coachEvaluationFixtures } from "./fixtures/coachEvaluationFixtures";
 
 declare const process: {
@@ -19,7 +15,7 @@ declare const process: {
 const evaluationEnv = process.env;
 const liveEvaluationEnabled = isLiveEvaluationEnabled(
   evaluationEnv,
-  "openai"
+  "anthropic"
 );
 
 function requiredEnvironment(name: string): string {
@@ -44,7 +40,7 @@ function optionalPrice(name: string): number | null {
 }
 
 describe.skipIf(!liveEvaluationEnabled)(
-  "opt-in OpenAI reference provider evaluation",
+  "opt-in Anthropic reference provider evaluation",
   () => {
     it("runs an explicitly capped fixture set and prints metadata-only reports", async () => {
       const selectedFixtures = selectCoachEvaluationFixtures(
@@ -52,29 +48,29 @@ describe.skipIf(!liveEvaluationEnabled)(
         evaluationEnv.COACH_EVAL_FIXTURE_IDS,
         evaluationEnv.COACH_EVAL_FIXTURE_LIMIT
       );
-      const apiKey = requiredEnvironment("OPENAI_API_KEY");
-      const model = requiredEnvironment("OPENAI_MODEL");
+      const apiKey = requiredEnvironment("ANTHROPIC_API_KEY");
+      const model = requiredEnvironment("ANTHROPIC_MODEL");
       const inputPrice = optionalPrice(
-        "OPENAI_INPUT_COST_PER_MILLION_USD"
+        "ANTHROPIC_INPUT_COST_PER_MILLION_USD"
       );
       const outputPrice = optionalPrice(
-        "OPENAI_OUTPUT_COST_PER_MILLION_USD"
+        "ANTHROPIC_OUTPUT_COST_PER_MILLION_USD"
       );
       const printSafePublicText = isSafePublicTextPreviewEnabled(
         evaluationEnv.COACH_LIVE_EVALUATION_PRINT_SAFE_TEXT
       );
-      const service = new OpenAiCoachService({
-        provider: "openai",
+      const service = new AnthropicCoachService({
+        provider: "anthropic",
         apiKey,
         model,
         timeoutMs: 12_000,
-        maxOutputTokens: resolveOpenAiMaxOutputTokens(
-          evaluationEnv.OPENAI_MAX_OUTPUT_TOKENS
+        maxOutputTokens: resolveAnthropicMaxOutputTokens(
+          evaluationEnv.ANTHROPIC_MAX_OUTPUT_TOKENS
         ),
       });
       const reports = await runLiveCoachEvaluation({
         adapter: {
-          provider: "openai",
+          provider: "anthropic",
           model,
           respondWithMetadata: (request) =>
             service.respondWithMetadata(request),

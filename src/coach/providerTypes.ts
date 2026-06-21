@@ -2,7 +2,7 @@ import type { CoachApiSuccessResponseV1 } from "../contracts/CoachApiContract";
 import type { CoachResponseValidationFailureCode } from "./coachResponseValidator";
 import type { CoachRuntimeSafetyFailureCode } from "./coachRuntimeSafety";
 
-export const coachProviderIdValues = ["openai"] as const;
+export const coachProviderIdValues = ["openai", "anthropic"] as const;
 
 export type CoachProviderId = (typeof coachProviderIdValues)[number];
 export type CoachProviderMode = "mock" | CoachProviderId;

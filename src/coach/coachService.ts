@@ -3,6 +3,7 @@ import {
   CoachApiRequestV1,
   CoachApiSuccessResponseV1,
 } from "../contracts/CoachApiContract";
+import { AnthropicCoachService } from "./anthropicCoachService";
 import { buildMockCoachResponse } from "./mockCoach";
 import { validateCoachApiSuccessResponse } from "./coachResponseValidator";
 import { validateCoachRuntimeSemanticSafety } from "./coachRuntimeSafety";
@@ -63,8 +64,13 @@ export function createConfiguredCoachService(
     return mockCoachService;
   }
 
+  const primaryService =
+    config.provider === "openai"
+      ? new OpenAiCoachService(config, fetchImplementation)
+      : new AnthropicCoachService(config, fetchImplementation);
+
   return withDeterministicFallback(
-    new OpenAiCoachService(config, fetchImplementation),
+    primaryService,
     onFallback
   );
 }
