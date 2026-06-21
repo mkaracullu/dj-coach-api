@@ -205,6 +205,38 @@ describe("Anthropic reference coach adapter", () => {
     });
   });
 
+  it("invokes an injected fetch without changing its receiver", async () => {
+    let receivedReceiver: unknown = null;
+    const fetchImplementation: typeof fetch = function (
+      this: unknown,
+      ..._args: Parameters<typeof fetch>
+    ) {
+      receivedReceiver = this;
+
+      if (this !== undefined) {
+        return Promise.reject(new TypeError("Illegal invocation"));
+      }
+
+      return Promise.resolve(
+        providerResponse({
+          message: "Keep the pulse steady and leave equal space between taps.",
+          nextActionLabel: "Try one steady tap round.",
+          responseType: "lesson_explanation",
+          fallbackReasonId: null,
+        })
+      );
+    };
+    const service = new AnthropicCoachService(
+      anthropicConfig(),
+      fetchImplementation
+    );
+
+    const result = await service.respondWithMetadata(fixture.request);
+
+    expect(receivedReceiver).toBeUndefined();
+    expect(result.provider).toBe("anthropic");
+  });
+
   it("falls back without leaking provider data into the public response", async () => {
     const rawProviderOutput = "RAW_CLAUDE_OUTPUT_MUST_NOT_LEAK";
     const apiKey = "SECRET_ANTHROPIC_KEY_MUST_NOT_LEAK";

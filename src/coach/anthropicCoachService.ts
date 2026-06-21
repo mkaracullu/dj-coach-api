@@ -136,10 +136,15 @@ function readOutputText(
 }
 
 export class AnthropicCoachService implements CoachService {
+  private readonly fetchImplementation: FetchImplementation;
+
   constructor(
     private readonly config: AnthropicCoachConfig,
-    private readonly fetchImplementation: FetchImplementation = fetch
-  ) {}
+    fetchImplementation: FetchImplementation = fetch
+  ) {
+    this.fetchImplementation = (input, init) =>
+      fetchImplementation(input, init);
+  }
 
   async respond(request: CoachApiRequestV1): Promise<unknown> {
     return (await this.respondWithMetadata(request)).response;

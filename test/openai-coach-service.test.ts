@@ -291,6 +291,38 @@ describe("OpenAI reference coach adapter", () => {
     expect(JSON.stringify(requestBody)).not.toContain("test-key-not-real");
   });
 
+  it("invokes an injected fetch without changing its receiver", async () => {
+    let receivedReceiver: unknown = null;
+    const fetchImplementation: typeof fetch = function (
+      this: unknown,
+      ..._args: Parameters<typeof fetch>
+    ) {
+      receivedReceiver = this;
+
+      if (this !== undefined) {
+        return Promise.reject(new TypeError("Illegal invocation"));
+      }
+
+      return Promise.resolve(
+        providerResponse({
+          message: "Keep the pulse steady and leave equal space between taps.",
+          nextActionLabel: "Try one steady tap round.",
+          responseType: "lesson_explanation",
+          fallbackReasonId: null,
+        })
+      );
+    };
+    const service = new OpenAiCoachService(
+      openAiConfig(),
+      fetchImplementation
+    );
+
+    const result = await service.respondWithMetadata(fixture.request);
+
+    expect(receivedReceiver).toBeUndefined();
+    expect(result.provider).toBe("openai");
+  });
+
   it("keeps safe public-text preview disabled unless explicitly enabled", async () => {
     const response = await getCoachApiResponse(fixture.request);
     const report = evaluateCoachResponse(fixture, response);

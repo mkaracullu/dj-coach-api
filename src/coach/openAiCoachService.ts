@@ -134,10 +134,15 @@ function parseProviderResponse(
 }
 
 export class OpenAiCoachService implements CoachService {
+  private readonly fetchImplementation: FetchImplementation;
+
   constructor(
     private readonly config: OpenAiCoachConfig,
-    private readonly fetchImplementation: FetchImplementation = fetch
-  ) {}
+    fetchImplementation: FetchImplementation = fetch
+  ) {
+    this.fetchImplementation = (input, init) =>
+      fetchImplementation(input, init);
+  }
 
   async respond(request: CoachApiRequestV1): Promise<unknown> {
     return (await this.respondWithMetadata(request)).response;
