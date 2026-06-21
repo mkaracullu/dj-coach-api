@@ -41,7 +41,7 @@ const suggestedQuestions: Record<string, string> = {
   what_focus_on_retry: "What should I focus on for the next retry?",
 };
 
-export type OpenAiPrompt = {
+export type CoachPrompt = {
   instructions: string;
   input: string;
 };
@@ -142,9 +142,9 @@ function buildRoutingGuidance(request: CoachApiRequestV1): string {
   return "Trusted routing decision: follow the response-type rules in the instructions.";
 }
 
-export function buildOpenAiCoachPrompt(
+export function buildCoachPrompt(
   request: CoachApiRequestV1
-): OpenAiPrompt {
+): CoachPrompt {
   const profile = request.context.learnerProfile;
   const lesson = request.context.lesson;
   const attempt = request.context.session7?.latestAttempt;

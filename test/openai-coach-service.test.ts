@@ -7,7 +7,7 @@ import {
   OpenAiCoachService,
   OpenAiProviderError,
 } from "../src/coach/openAiCoachService";
-import { buildOpenAiCoachPrompt } from "../src/coach/coachPrompt";
+import { buildCoachPrompt } from "../src/coach/coachPrompt";
 import {
   resolveCoachProviderConfig,
   resolveOpenAiMaxOutputTokens,
@@ -61,8 +61,8 @@ function openAiConfig() {
 
 describe("OpenAI reference coach adapter", () => {
   it("adds trusted Session 2 Tap the Pulse objectives without prescribing an answer", () => {
-    const englishPrompt = buildOpenAiCoachPrompt(fixture.request);
-    const turkishPrompt = buildOpenAiCoachPrompt(
+    const englishPrompt = buildCoachPrompt(fixture.request);
+    const turkishPrompt = buildCoachPrompt(
       coachEvaluationFixtures[1]!.request
     );
 
@@ -91,7 +91,7 @@ describe("OpenAI reference coach adapter", () => {
   });
 
   it("includes explicit response-type selection guidance", () => {
-    const prompt = buildOpenAiCoachPrompt(fixture.request);
+    const prompt = buildCoachPrompt(fixture.request);
 
     expect(prompt.instructions).toContain(
       "use concept_clarification when the learner asks what a concept means"
@@ -108,7 +108,7 @@ describe("OpenAI reference coach adapter", () => {
   });
 
   it("steers Session 7 close-result coaching to attempt feedback", () => {
-    const session7Prompt = buildOpenAiCoachPrompt(
+    const session7Prompt = buildCoachPrompt(
       coachEvaluationFixtures[2]!.request
     );
 
@@ -171,7 +171,7 @@ describe("OpenAI reference coach adapter", () => {
     const routingFixture = coachEvaluationFixtures.find(
       (candidate) => candidate.id === fixtureId
     )!;
-    const prompt = buildOpenAiCoachPrompt(routingFixture.request);
+    const prompt = buildCoachPrompt(routingFixture.request);
 
     expect(prompt.input).toContain(`use ${expectedResponseType}`);
     expect(prompt.input).toContain(expectedFallbackReason);
@@ -192,7 +192,7 @@ describe("OpenAI reference coach adapter", () => {
     const controllerFixture = coachEvaluationFixtures.find(
       (candidate) => candidate.id === "goal-understand-controls"
     )!;
-    const prompt = buildOpenAiCoachPrompt(controllerFixture.request);
+    const prompt = buildCoachPrompt(controllerFixture.request);
 
     expect(prompt.input).toContain(
       "use responseType setup_guidance or capability_limit"
@@ -256,6 +256,7 @@ describe("OpenAI reference coach adapter", () => {
       outputTokens: 40,
       totalTokens: 160,
     });
+    expect(result.estimatedCostUsd).toBeNull();
 
     const requestBody = JSON.parse(
       String(fetchImplementation.mock.calls[0]?.[1]?.body)

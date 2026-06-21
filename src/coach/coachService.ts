@@ -6,14 +6,12 @@ import {
 import { buildMockCoachResponse } from "./mockCoach";
 import { validateCoachApiSuccessResponse } from "./coachResponseValidator";
 import { validateCoachRuntimeSemanticSafety } from "./coachRuntimeSafety";
-import {
-  OpenAiCoachService,
-  OpenAiProviderError,
-} from "./openAiCoachService";
+import { OpenAiCoachService } from "./openAiCoachService";
 import {
   CoachProviderEnvironment,
   resolveCoachProviderConfig,
 } from "./providerConfig";
+import { CoachProviderError } from "./providerTypes";
 
 export type CoachService = {
   respond(request: CoachApiRequestV1): Promise<unknown>;
@@ -43,7 +41,7 @@ function withDeterministicFallback(
         return await primaryService.respond(request);
       } catch (error) {
         onFallback?.(
-          error instanceof OpenAiProviderError &&
+          error instanceof CoachProviderError &&
               error.diagnostics.semanticSafetyFailed
             ? "semantic_safety_fallback"
             : "provider_fallback"

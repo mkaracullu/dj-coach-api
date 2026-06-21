@@ -12,8 +12,10 @@ import {
 } from "./coach/coachService";
 import {
   CoachProviderEnvironment,
+  isExternalCoachProvider,
   resolveCoachProviderConfig,
 } from "./coach/providerConfig";
+import type { CoachProviderMode } from "./coach/providerTypes";
 import { ApiError } from "./http/ApiError";
 import {
   apiError,
@@ -56,7 +58,7 @@ async function handleCoachRespond(
   const startedAt = Date.now();
   const headerRequestId = getSafeRequestIdHeader(request);
   let requestId = headerRequestId;
-  let providerMode: "mock" | "openai" = "mock";
+  let providerMode: CoachProviderMode = "mock";
   let sessionNumber: BootcampSessionNumber | undefined;
   let questionSource: "suggested" | "free_text" | undefined;
   let suggestedQuestionId: CoachSuggestedQuestionId | undefined;
@@ -91,7 +93,7 @@ async function handleCoachRespond(
     providerMode = providerConfig.provider;
     await enforceRequestRateLimit(request, env);
 
-    if (providerConfig.provider === "openai") {
+    if (isExternalCoachProvider(providerConfig.provider)) {
       await enforceProviderCallGuard(request, env, providerConfig.provider);
     }
 
@@ -103,7 +105,7 @@ async function handleCoachRespond(
       });
 
     stage = "service";
-    providerInvocationAttempted = providerMode === "openai";
+    providerInvocationAttempted = isExternalCoachProvider(providerMode);
     const coachResponse = await getCoachApiResponse(coachRequest, service);
     fallbackReasonId = coachResponse.response.fallbackReasonId ?? undefined;
     result = fallbackResult ?? "success";

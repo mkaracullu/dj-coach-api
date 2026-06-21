@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   OpenAiCoachService,
-  OpenAiProviderError,
 } from "../src/coach/openAiCoachService";
 import { resolveOpenAiMaxOutputTokens } from "../src/coach/providerConfig";
-import { evaluateCoachResponse } from "./evaluation/coachEvaluator";
 import {
-  addSafePublicTextPreview,
   isSafePublicTextPreviewEnabled,
 } from "./evaluation/safePublicPreview";
 import { selectCoachEvaluationFixtures } from "./evaluation/selectCoachEvaluationFixtures";
+import { estimateTokenUsageCostUsd } from "./evaluation/estimateUsageCost";
+import { runLiveCoachEvaluation } from "./evaluation/runLiveCoachEvaluation";
 import { coachEvaluationFixtures } from "./fixtures/coachEvaluationFixtures";
 
 declare const process: {
@@ -41,26 +40,6 @@ function optionalPrice(name: string): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
-function estimateCost(
-  inputTokens: number,
-  outputTokens: number,
-  inputPricePerMillion: number | null,
-  outputPricePerMillion: number | null
-): number | null {
-  if (
-    inputPricePerMillion === null ||
-    outputPricePerMillion === null
-  ) {
-    return null;
-  }
-
-  return (
-    (inputTokens * inputPricePerMillion +
-      outputTokens * outputPricePerMillion) /
-    1_000_000
-  );
-}
-
 describe.skipIf(!liveEvaluationEnabled)(
   "opt-in OpenAI reference provider evaluation",
   () => {
@@ -90,57 +69,21 @@ describe.skipIf(!liveEvaluationEnabled)(
           evaluationEnv.OPENAI_MAX_OUTPUT_TOKENS
         ),
       });
-      const reports = [];
-
-      for (const fixture of selectedFixtures) {
-        try {
-          const result = await service.respondWithMetadata(fixture.request);
-          const estimatedCostUsd = result.usage
-            ? estimateCost(
-                result.usage.inputTokens,
-                result.usage.outputTokens,
-                inputPrice,
-                outputPrice
-              )
-            : null;
-
-          reports.push(
-            addSafePublicTextPreview(
-              evaluateCoachResponse(fixture, result.response, {
-                provider: result.provider,
-                model: result.model,
-                latencyMs: result.latencyMs,
-                estimatedCostUsd,
-                providerUsage: result.usage,
-                errorType: null,
-                diagnostics: null,
-              }),
-              result.response,
-              printSafePublicText
-            )
-          );
-        } catch (error) {
-          reports.push(
-            evaluateCoachResponse(fixture, null, {
-              provider: "openai",
-              model,
-              latencyMs: null,
-              estimatedCostUsd: null,
-              providerUsage: null,
-              errorType:
-                error instanceof OpenAiProviderError
-                  ? error.errorType
-                  : error instanceof Error
-                    ? error.name
-                    : "UnknownProviderError",
-              diagnostics:
-                error instanceof OpenAiProviderError
-                  ? error.diagnostics
-                  : null,
-            })
-          );
-        }
-      }
+      const reports = await runLiveCoachEvaluation({
+        adapter: {
+          provider: "openai",
+          model,
+          respondWithMetadata: (request) =>
+            service.respondWithMetadata(request),
+        },
+        fixtures: selectedFixtures,
+        printSafePublicText,
+        estimateCostUsd: (usage) =>
+          estimateTokenUsageCostUsd(usage, {
+            input: inputPrice,
+            output: outputPrice,
+          }),
+      });
 
       console.log(JSON.stringify({ reports }, null, 2));
 

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { getCoachApiResponse } from "../src/coach/coachService";
+import {
+  buildCoachProviderSafeDiagnostics,
+  CoachProviderError,
+} from "../src/coach/providerTypes";
 import { validateCoachApiRequest } from "../src/validation/coachRequestValidator";
 import { evaluateCoachResponse } from "./evaluation/coachEvaluator";
+import { estimateTokenUsageCostUsd } from "./evaluation/estimateUsageCost";
+import { runLiveCoachEvaluation } from "./evaluation/runLiveCoachEvaluation";
 import {
   coachEvaluationFixtures,
   CoachEvaluationFixture,
@@ -153,4 +159,118 @@ describe("provider-neutral coach evaluation harness", () => {
     expect(turkishReport.scores.english_quality).toBeNull();
     expect(turkishReport.scores.turkish_quality).toBe(0);
   });
+
+  it("runs fixtures through the provider-neutral evaluation runner", async () => {
+    const fixture = coachEvaluationFixtures[0]!;
+    const response = await getCoachApiResponse(fixture.request);
+    const reports = await runLiveCoachEvaluation({
+      adapter: {
+        provider: "openai",
+        model: "offline-reference-model",
+        async respondWithMetadata() {
+          return {
+            response,
+            provider: "openai",
+            model: "offline-reference-model",
+            latencyMs: 25,
+            usage: {
+              inputTokens: 100,
+              outputTokens: 20,
+              totalTokens: 120,
+            },
+            estimatedCostUsd: null,
+          };
+        },
+      },
+      fixtures: [fixture],
+      printSafePublicText: false,
+      estimateCostUsd: (usage) =>
+        estimateTokenUsageCostUsd(usage, {
+          input: 1,
+          output: 2,
+        }),
+    });
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      fixtureId: fixture.id,
+      provider: "openai",
+      model: "offline-reference-model",
+      latencyMs: 25,
+      estimatedCostUsd: 0.00014,
+      providerUsage: {
+        inputTokens: 100,
+        outputTokens: 20,
+        totalTokens: 120,
+      },
+      hardGatePassed: true,
+    });
+    expect(reports[0]).not.toHaveProperty("publicResponse");
+  });
+
+  it("normalizes safe provider failures without exposing raw provider data", async () => {
+    const fixture = coachEvaluationFixtures[0]!;
+    const rawProviderOutput = "RAW_PROVIDER_OUTPUT_MUST_NOT_LEAK";
+    const reports = await runLiveCoachEvaluation({
+      adapter: {
+        provider: "openai",
+        model: "offline-reference-model",
+        async respondWithMetadata() {
+          throw new CoachProviderError(
+            "openai",
+            "invalid_structured_output",
+            rawProviderOutput,
+            buildCoachProviderSafeDiagnostics("invalid_structured_output", {
+              providerHttpStatus: 200,
+              responseValidatorFailed: true,
+              responseValidationFailureCode: "invalid_payload_shape",
+            })
+          );
+        },
+      },
+      fixtures: [fixture],
+      printSafePublicText: false,
+    });
+
+    expect(reports[0]).toMatchObject({
+      provider: "openai",
+      model: "offline-reference-model",
+      hardGatePassed: false,
+      errorType: "invalid_structured_output",
+      diagnostics: {
+        providerHttpStatus: 200,
+        responseValidatorFailed: true,
+        responseValidationFailureCode: "invalid_payload_shape",
+      },
+    });
+    expect(JSON.stringify(reports)).not.toContain(rawProviderOutput);
+  });
+});
+
+it("does not expose generic provider error names or messages", async () => {
+  const fixture = coachEvaluationFixtures[0]!;
+  const rawProviderOutput = "RAW_GENERIC_PROVIDER_ERROR_MUST_NOT_LEAK";
+
+  const reports = await runLiveCoachEvaluation({
+    adapter: {
+      provider: "openai",
+      model: "offline-reference-model",
+      async respondWithMetadata() {
+        const error = new Error(rawProviderOutput);
+        error.name = rawProviderOutput;
+        throw error;
+      },
+    },
+    fixtures: [fixture],
+    printSafePublicText: false,
+  });
+
+  expect(reports[0]).toMatchObject({
+    provider: "openai",
+    model: "offline-reference-model",
+    hardGatePassed: false,
+    errorType: "provider_error",
+    diagnostics: null,
+  });
+  expect(JSON.stringify(reports)).not.toContain(rawProviderOutput);
 });

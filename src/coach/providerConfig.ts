@@ -1,4 +1,5 @@
 import { coachApiLimits } from "../contracts/CoachApiContract";
+import type { CoachProviderMode } from "./providerTypes";
 
 export type CoachProviderEnvironment = {
   COACH_PROVIDER?: string;
@@ -18,6 +19,12 @@ export type OpenAiCoachConfig = {
 export type CoachProviderConfig =
   | { provider: "mock" }
   | OpenAiCoachConfig;
+
+export function isExternalCoachProvider(
+  provider: CoachProviderMode
+): provider is Exclude<CoachProviderMode, "mock"> {
+  return provider !== "mock";
+}
 
 const defaultOpenAiMaxOutputTokens = 600;
 const maximumOpenAiMaxOutputTokens = 800;

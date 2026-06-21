@@ -4,6 +4,7 @@ import type {
   CoachSuggestedQuestionId,
 } from "../contracts/CoachApiContract";
 import type { ApiErrorCode } from "../http/ApiError";
+import type { CoachProviderMode } from "../coach/providerTypes";
 
 export type CoachTelemetryResultCategory =
   | "success"
@@ -18,7 +19,7 @@ export type CoachTelemetryResultCategory =
 export type CoachTelemetryEvent = {
   event: "coach_request_completed";
   requestId?: string;
-  providerMode: "mock" | "openai";
+  providerMode: CoachProviderMode;
   route: "/v1/coach/respond";
   sessionNumber?: BootcampSessionNumber;
   questionSource?: "suggested" | "free_text";

@@ -17,87 +17,33 @@ import {
   UnsafeCoachResponseError,
   validateCoachRuntimeSemanticSafety,
 } from "./coachRuntimeSafety";
-import { buildOpenAiCoachPrompt } from "./coachPrompt";
+import { buildCoachPrompt } from "./coachPrompt";
 import type { OpenAiCoachConfig } from "./providerConfig";
+import {
+  buildCoachProviderSafeDiagnostics,
+  CoachProviderError,
+  type CoachProviderErrorCategory,
+  type CoachProviderResult,
+  type CoachProviderSafeDiagnostics,
+  type CoachProviderUsage,
+} from "./providerTypes";
 
 const openAiResponsesEndpoint = "https://api.openai.com/v1/responses";
 const maximumProviderResponseBytes = 64 * 1024;
 
-export type OpenAiProviderUsage = {
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-};
+export type OpenAiProviderUsage = CoachProviderUsage;
+export type OpenAiCoachResult = CoachProviderResult<"openai">;
+export type OpenAiProviderErrorType = CoachProviderErrorCategory;
+export type OpenAiSafeDiagnostics = CoachProviderSafeDiagnostics;
 
-export type OpenAiCoachResult = {
-  response: CoachApiSuccessResponseV1;
-  provider: "openai";
-  model: string;
-  latencyMs: number;
-  usage: OpenAiProviderUsage | null;
-};
-
-export type OpenAiProviderErrorType =
-  | "timeout"
-  | "http_error"
-  | "invalid_response"
-  | "invalid_structured_output";
-
-export type OpenAiSafeDiagnostics = {
-  providerHttpStatus: number | null;
-  providerErrorCategory: OpenAiProviderErrorType;
-  jsonParseFailed: boolean;
-  schemaExtractionFailed: boolean;
-  responseValidatorFailed: boolean;
-  responseValidationFailureCode: CoachResponseValidationFailureCode | null;
-  missingPublicFields: string[];
-  unknownPublicFields: string[];
-  invalidResponseType: boolean;
-  invalidFallbackReasonCombination: boolean;
-  messageCharacterLimitExceeded: boolean;
-  responseWordLimitExceeded: boolean;
-  responseByteLimitExceeded: boolean;
-  nextActionLabelLimitExceeded: boolean;
-  semanticSafetyFailed: boolean;
-  semanticSafetyFailureCode: CoachRuntimeSafetyFailureCode | null;
-  deterministicFallbackUsed: boolean;
-};
-
-function buildSafeDiagnostics(
-  providerErrorCategory: OpenAiProviderErrorType,
-  overrides: Partial<OpenAiSafeDiagnostics> = {}
-): OpenAiSafeDiagnostics {
-  return {
-    providerHttpStatus: null,
-    providerErrorCategory,
-    jsonParseFailed: false,
-    schemaExtractionFailed: false,
-    responseValidatorFailed: false,
-    responseValidationFailureCode: null,
-    missingPublicFields: [],
-    unknownPublicFields: [],
-    invalidResponseType: false,
-    invalidFallbackReasonCombination: false,
-    messageCharacterLimitExceeded: false,
-    responseWordLimitExceeded: false,
-    responseByteLimitExceeded: false,
-    nextActionLabelLimitExceeded: false,
-    semanticSafetyFailed: false,
-    semanticSafetyFailureCode: null,
-    deterministicFallbackUsed: false,
-    ...overrides,
-  };
-}
-
-export class OpenAiProviderError extends Error {
+export class OpenAiProviderError extends CoachProviderError {
   constructor(
     readonly errorType: OpenAiProviderErrorType,
     message: string,
-    readonly diagnostics: OpenAiSafeDiagnostics = buildSafeDiagnostics(
-      errorType
-    )
+    diagnostics: OpenAiSafeDiagnostics =
+      buildCoachProviderSafeDiagnostics(errorType)
   ) {
-    super(message);
+    super("openai", errorType, message, diagnostics);
     this.name = "OpenAiProviderError";
   }
 }
@@ -181,7 +127,7 @@ function inspectStructuredPayload(
   validationFailureCode: CoachResponseValidationFailureCode,
   requestId: string
 ): Pick<
-  OpenAiSafeDiagnostics,
+  CoachProviderSafeDiagnostics,
   | "responseValidatorFailed"
   | "responseValidationFailureCode"
   | "missingPublicFields"
@@ -270,7 +216,7 @@ function readOutputText(
     throw new OpenAiProviderError(
       "invalid_response",
       "Provider response output is missing.",
-      buildSafeDiagnostics("invalid_response", {
+      buildCoachProviderSafeDiagnostics("invalid_response", {
         providerHttpStatus,
         schemaExtractionFailed: true,
       })
@@ -296,7 +242,7 @@ function readOutputText(
   throw new OpenAiProviderError(
     "invalid_response",
     "Provider response did not contain structured text.",
-    buildSafeDiagnostics("invalid_response", {
+    buildCoachProviderSafeDiagnostics("invalid_response", {
       providerHttpStatus,
       schemaExtractionFailed: true,
     })
@@ -315,7 +261,7 @@ function parseProviderResponse(
     throw new OpenAiProviderError(
       "invalid_response",
       "Provider response was not valid JSON.",
-      buildSafeDiagnostics("invalid_response", {
+      buildCoachProviderSafeDiagnostics("invalid_response", {
         providerHttpStatus,
         jsonParseFailed: true,
       })
@@ -326,7 +272,7 @@ function parseProviderResponse(
     throw new OpenAiProviderError(
       "invalid_response",
       "Provider response did not complete.",
-      buildSafeDiagnostics("invalid_response", {
+      buildCoachProviderSafeDiagnostics("invalid_response", {
         providerHttpStatus,
       })
     );
@@ -348,7 +294,7 @@ export class OpenAiCoachService implements CoachService {
   async respondWithMetadata(
     request: CoachApiRequestV1
   ): Promise<OpenAiCoachResult> {
-    const prompt = buildOpenAiCoachPrompt(request);
+    const prompt = buildCoachPrompt(request);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
     const startedAt = Date.now();
@@ -399,7 +345,7 @@ export class OpenAiCoachService implements CoachService {
       throw new OpenAiProviderError(
         "http_error",
         `Provider returned HTTP ${providerResponse.status}.`,
-        buildSafeDiagnostics("http_error", {
+        buildCoachProviderSafeDiagnostics("http_error", {
           providerHttpStatus: providerResponse.status,
         })
       );
@@ -414,7 +360,7 @@ export class OpenAiCoachService implements CoachService {
       throw new OpenAiProviderError(
         "invalid_response",
         "Provider response was too large.",
-        buildSafeDiagnostics("invalid_response", {
+        buildCoachProviderSafeDiagnostics("invalid_response", {
           providerHttpStatus: providerResponse.status,
         })
       );
@@ -429,7 +375,7 @@ export class OpenAiCoachService implements CoachService {
       throw new OpenAiProviderError(
         "invalid_response",
         "Provider response was too large.",
-        buildSafeDiagnostics("invalid_response", {
+        buildCoachProviderSafeDiagnostics("invalid_response", {
           providerHttpStatus: providerResponse.status,
         })
       );
@@ -451,7 +397,7 @@ export class OpenAiCoachService implements CoachService {
       throw new OpenAiProviderError(
         "invalid_structured_output",
         "Provider structured output was not valid JSON.",
-        buildSafeDiagnostics("invalid_structured_output", {
+        buildCoachProviderSafeDiagnostics("invalid_structured_output", {
           providerHttpStatus: providerResponse.status,
           jsonParseFailed: true,
         })
@@ -478,7 +424,7 @@ export class OpenAiCoachService implements CoachService {
       throw new OpenAiProviderError(
         "invalid_structured_output",
         "Provider structured output failed backend validation.",
-        buildSafeDiagnostics("invalid_structured_output", {
+        buildCoachProviderSafeDiagnostics("invalid_structured_output", {
           providerHttpStatus: providerResponse.status,
           ...inspectStructuredPayload(
             payload,
@@ -498,7 +444,7 @@ export class OpenAiCoachService implements CoachService {
       throw new OpenAiProviderError(
         "invalid_structured_output",
         "Provider structured output failed runtime safety validation.",
-        buildSafeDiagnostics("invalid_structured_output", {
+        buildCoachProviderSafeDiagnostics("invalid_structured_output", {
           providerHttpStatus: providerResponse.status,
           semanticSafetyFailed: true,
           semanticSafetyFailureCode,
@@ -512,6 +458,7 @@ export class OpenAiCoachService implements CoachService {
       model: this.config.model,
       latencyMs: Date.now() - startedAt,
       usage: readUsage(parsedResponse),
+      estimatedCostUsd: null,
     };
   }
 }

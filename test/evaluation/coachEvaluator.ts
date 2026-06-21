@@ -2,7 +2,7 @@ import type {
   CoachApiSuccessResponseV1,
   CoachResponseType,
 } from "../../src/contracts/CoachApiContract";
-import type { OpenAiSafeDiagnostics } from "../../src/coach/openAiCoachService";
+import type { CoachProviderSafeDiagnostics } from "../../src/coach/providerTypes";
 import {
   InvalidCoachResponseError,
   validateCoachApiSuccessResponse,
@@ -54,7 +54,7 @@ export type CoachEvaluationReport = {
     totalTokens: number;
   } | null;
   errorType: string | null;
-  diagnostics: OpenAiSafeDiagnostics | null;
+  diagnostics: CoachProviderSafeDiagnostics | null;
 };
 
 export type CoachEvaluationMetadata = Pick<

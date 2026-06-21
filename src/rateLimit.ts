@@ -1,4 +1,5 @@
 import { apiError } from "./http/json";
+import type { CoachProviderId } from "./coach/providerTypes";
 
 export type CoachRateLimitEnv = {
   COACH_RATE_LIMITER?: RateLimit;
@@ -57,7 +58,7 @@ export async function enforceRequestRateLimit(
 export async function enforceProviderCallGuard(
   request: Request,
   env: CoachRateLimitEnv,
-  provider: "openai"
+  provider: CoachProviderId
 ): Promise<void> {
   if (!env.COACH_PROVIDER_RATE_LIMITER) {
     throw providerGuardrailError();
