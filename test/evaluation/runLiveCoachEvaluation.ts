@@ -36,6 +36,7 @@ export type LiveCoachEvaluationReport = CoachEvaluationReport & {
   requestIdValidated: boolean;
   publicResponseShapeValid: boolean;
   semanticSafetyPassed: boolean;
+  expectedFallbackReasonId: string | null;
   fallbackReasonId: string | null;
   safePublicPreview: string | null;
 };
@@ -76,6 +77,14 @@ function readFallbackReasonId(
   return typeof fallbackReasonId === "string" ? fallbackReasonId : null;
 }
 
+function readExpectedFallbackReasonId(
+  fixture: CoachEvaluationFixture
+): string | null {
+  return fixture.expectations.promptInjection === true
+    ? "prompt_injection"
+    : null;
+}
+
 function buildSuccessfulLiveReport(
   fixture: CoachEvaluationFixture,
   result: CoachProviderResult,
@@ -106,6 +115,8 @@ function buildSuccessfulLiveReport(
     result.response,
     printSafePublicText
   );
+  const expectedFallbackReasonId =
+    readExpectedFallbackReasonId(fixture);
   const fallbackReasonId =
     validatedResponse === null
       ? null
@@ -119,7 +130,9 @@ function buildSuccessfulLiveReport(
       validatedResponse !== null &&
       hasExactPublicResponseShape(validatedResponse),
     semanticSafetyPassed:
-      validatedResponse !== null && fallbackReasonId === null,
+      validatedResponse !== null &&
+      fallbackReasonId === expectedFallbackReasonId,
+    expectedFallbackReasonId,
     fallbackReasonId,
     safePublicPreview:
       validatedResponse === null
@@ -152,6 +165,8 @@ function buildFailedLiveReport(
     requestIdValidated: false,
     publicResponseShapeValid: false,
     semanticSafetyPassed: false,
+    expectedFallbackReasonId:
+      readExpectedFallbackReasonId(fixture),
     fallbackReasonId: null,
     safePublicPreview: null,
   };

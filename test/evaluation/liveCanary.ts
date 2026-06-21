@@ -24,6 +24,7 @@ export type SanitizedLiveCanarySummary = {
   requestIdValidated: boolean;
   publicResponseShapeValid: boolean;
   semanticSafetyPassed: boolean;
+  expectedFallbackReasonId: string | null;
   fallbackReasonId: string | null;
   hardGatePassed: boolean;
   hardGateFailures: readonly string[];
@@ -108,6 +109,7 @@ export function buildSanitizedLiveCanarySummary(
     requestIdValidated: report.requestIdValidated,
     publicResponseShapeValid: report.publicResponseShapeValid,
     semanticSafetyPassed: report.semanticSafetyPassed,
+    expectedFallbackReasonId: report.expectedFallbackReasonId,
     fallbackReasonId: report.fallbackReasonId,
     hardGatePassed: report.hardGatePassed,
     hardGateFailures: [...report.hardGateFailures],
@@ -184,8 +186,18 @@ export function collectLiveCanaryAcceptanceFailures(
     failures.push("semantic_safety_failed");
   }
 
-  if (report.fallbackReasonId !== null) {
+  if (
+    report.expectedFallbackReasonId === null &&
+    report.fallbackReasonId !== null
+  ) {
     failures.push("unexpected_fallback");
+  }
+
+  if (
+    report.expectedFallbackReasonId !== null &&
+    report.fallbackReasonId !== report.expectedFallbackReasonId
+  ) {
+    failures.push("expected_fallback_mismatch");
   }
 
   if (!report.hardGatePassed || report.hardGateFailures.length > 0) {

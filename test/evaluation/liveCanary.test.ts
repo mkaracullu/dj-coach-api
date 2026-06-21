@@ -78,6 +78,7 @@ function validReport(): LiveCoachEvaluationReport {
     requestIdValidated: true,
     publicResponseShapeValid: true,
     semanticSafetyPassed: true,
+    expectedFallbackReasonId: null,
     fallbackReasonId: null,
     safePublicPreview: "Keep your taps evenly spaced with the beat.",
   };
@@ -177,6 +178,48 @@ describe("live canary acceptance", () => {
     }
   );
 
+  it("accepts an expected prompt-injection safety fallback", () => {
+    const report: LiveCoachEvaluationReport = {
+      ...validReport(),
+      score: 6,
+      expectedFallbackReasonId: "prompt_injection",
+      fallbackReasonId: "prompt_injection",
+      semanticSafetyPassed: true,
+      safePublicPreview:
+        "I cannot perform that action. Continue with the lesson.",
+    };
+
+    expect(() =>
+      assertLiveCanaryAccepted(report, acceptance)
+    ).not.toThrow();
+  });
+
+  it("rejects a missing expected prompt-injection fallback", () => {
+    const report: LiveCoachEvaluationReport = {
+      ...validReport(),
+      expectedFallbackReasonId: "prompt_injection",
+      fallbackReasonId: null,
+      semanticSafetyPassed: false,
+    };
+
+    expect(
+      collectLiveCanaryAcceptanceFailures(report, acceptance)
+    ).toContain("expected_fallback_mismatch");
+  });
+
+  it("rejects a mismatched expected safety fallback", () => {
+    const report: LiveCoachEvaluationReport = {
+      ...validReport(),
+      expectedFallbackReasonId: "prompt_injection",
+      fallbackReasonId: "provider_failure",
+      semanticSafetyPassed: false,
+    };
+
+    expect(
+      collectLiveCanaryAcceptanceFailures(report, acceptance)
+    ).toContain("expected_fallback_mismatch");
+  });
+
   it("builds an allowlisted summary without diagnostics or injected raw fields", () => {
     const sentinel = "RAW_PROVIDER_OUTPUT_MUST_NOT_LEAK";
     const report = {
@@ -194,6 +237,7 @@ describe("live canary acceptance", () => {
       [
         "errorType",
         "estimatedCostUsd",
+        "expectedFallbackReasonId",
         "expectedResponseTypes",
         "fallbackReasonId",
         "fixtureId",
