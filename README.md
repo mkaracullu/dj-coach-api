@@ -298,9 +298,11 @@ rate-limit bindings separate. The production environment does not inherit the
 top-level `vars` or rate-limit bindings; both are declared explicitly in
 `wrangler.jsonc`.
 
-`ENVIRONMENT` is currently informational. Source code accepts the binding but
-does not branch on it. Isolation is provided by the distinct Worker,
-environment-specific configuration, secrets and limiter namespaces.
+`ENVIRONMENT` has one narrow runtime safety role: when its value is
+`production`, the request-level limiter binding is mandatory. It does not
+select a provider, activate OpenAI or alter provider routing. Development,
+local and unit-test environments may omit the request limiter; both checked-in
+Worker environments still declare it.
 
 No custom route or domain is configured. The separate `workers.dev` endpoint is
 the accepted initial production endpoint.
@@ -330,6 +332,25 @@ namespace: 2001
 limit: 10
 period: 60 seconds
 ```
+
+The request-level limiter has deterministic failure behavior:
+
+* `success=true` continues to provider selection;
+* valid `success=false` returns `429 rate_limited` with `Retry-After: 60`;
+* a missing production binding returns `503 server_failure`;
+* a present binding that throws, rejects or returns malformed data returns
+  `503 server_failure` in every environment;
+* a missing binding outside production is skipped for local and unit-test
+  compatibility.
+
+Limiter infrastructure failures emit
+`result=request_limiter_unavailable`; ordinary valid denials continue to emit
+`result=rate_limited`. Neither outcome reaches experiment assignment, the
+short-window provider guard, the global provider-call cap, provider service
+execution or deterministic provider fallback.
+
+Request-limiter telemetry never includes binding errors, exception messages,
+IP addresses or limiter keys.
 
 ### External-provider guard
 

@@ -625,6 +625,9 @@ describe("DJ Lingo Coach API", () => {
 
   it("returns 429 when the rate limiter rejects the key", async () => {
     const coachService = createTrackingCoachService();
+    const consoleLog = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
     const env: Env = {
       COACH_RATE_LIMITER: {
         async limit() {
@@ -648,6 +651,285 @@ describe("DJ Lingo Coach API", () => {
       },
     });
     expect(coachService.respond).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(String(consoleLog.mock.calls.at(-1)?.[0]))
+    ).toMatchObject({
+      result: "rate_limited",
+      publicErrorType: "rate_limited",
+      providerInvocationAttempted: false,
+    });
+    consoleLog.mockRestore();
+  });
+
+  it("requires the request limiter in production, including mock mode", async () => {
+    const coachService = createTrackingCoachService();
+    const consoleLog = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
+    const response = await createWorker(coachService).fetch(
+      makeRequest(validRequest),
+      {
+        ENVIRONMENT: "production",
+        COACH_PROVIDER: "mock",
+      }
+    );
+    const event = JSON.parse(
+      String(consoleLog.mock.calls.at(-1)?.[0])
+    ) as Record<string, unknown>;
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: {
+        code: "server_failure",
+        message: "Coach service is temporarily unavailable.",
+      },
+    });
+    expect(coachService.respond).not.toHaveBeenCalled();
+    expect(event).toMatchObject({
+      result: "request_limiter_unavailable",
+      publicErrorType: "server_failure",
+      providerInvocationAttempted: false,
+    });
+    expect(event).not.toHaveProperty("providerUsageCapOutcome");
+    expect(event).not.toHaveProperty("actualExternalProvider");
+    expect(event).not.toHaveProperty("providerLatencyMs");
+    expect(event).not.toHaveProperty("providerInputTokens");
+    consoleLog.mockRestore();
+  });
+
+  it("stops all provider stages after a valid request-limiter denial", async () => {
+    const requestLimit = vi.fn(async () => ({ success: false }));
+    const providerLimit = vi.fn(async () => ({ success: true }));
+    const capConsume = vi.fn(async (_periodKey: string, cap: number) => ({
+      allowed: true,
+      limit: cap,
+      remaining: cap - 1,
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const consoleLog = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
+    const response = await worker.fetch(
+      makeRequest(validRequest),
+      completeOpenAiEnv({
+        ENVIRONMENT: "production",
+        COACH_RATE_LIMITER: {
+          limit: requestLimit,
+        } as unknown as RateLimit,
+        COACH_PROVIDER_RATE_LIMITER: {
+          limit: providerLimit,
+        } as unknown as RateLimit,
+        COACH_PROVIDER_USAGE_CAP:
+          providerUsageCapBinding(capConsume),
+      })
+    );
+    const event = JSON.parse(
+      String(consoleLog.mock.calls.at(-1)?.[0])
+    ) as Record<string, unknown>;
+
+    expect(response.status).toBe(429);
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(requestLimit).toHaveBeenCalledTimes(1);
+    expect(providerLimit).not.toHaveBeenCalled();
+    expect(capConsume).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(event).toMatchObject({
+      result: "rate_limited",
+      publicErrorType: "rate_limited",
+      providerInvocationAttempted: false,
+    });
+    expect(event).not.toHaveProperty("providerUsageCapOutcome");
+    expect(event).not.toHaveProperty("actualExternalProvider");
+
+    fetchSpy.mockRestore();
+    consoleLog.mockRestore();
+  });
+
+  it.each([
+    {
+      name: "throws",
+      limit: vi.fn(async () => {
+        throw new Error(
+          "RAW_LIMITER_ERROR_203.0.113.55_coach:ip:203.0.113.55"
+        );
+      }),
+    },
+    {
+      name: "returns a non-object",
+      limit: vi.fn(async () => null),
+    },
+    {
+      name: "omits boolean success",
+      limit: vi.fn(async () => ({ success: "true" })),
+    },
+  ])(
+    "fails closed before all provider stages when the request limiter $name",
+    async ({ limit }) => {
+      const rawIpAddress = "203.0.113.55";
+      const rawLimiterKey = `coach:ip:${rawIpAddress}`;
+      const providerLimit = vi.fn(async () => ({ success: true }));
+      const capConsume = vi.fn(async (_periodKey: string, cap: number) => ({
+        allowed: true,
+        limit: cap,
+        remaining: cap - 1,
+      }));
+      const fetchSpy = vi.spyOn(globalThis, "fetch");
+      const consoleLog = vi
+        .spyOn(console, "log")
+        .mockImplementation(() => undefined);
+      const response = await worker.fetch(
+        makeRequest(validRequest, {
+          "CF-Connecting-IP": rawIpAddress,
+        }),
+        completeOpenAiEnv({
+          ENVIRONMENT: "production",
+          COACH_RATE_LIMITER: {
+            limit,
+          } as unknown as RateLimit,
+          COACH_PROVIDER_RATE_LIMITER: {
+            limit: providerLimit,
+          } as unknown as RateLimit,
+          COACH_PROVIDER_USAGE_CAP:
+            providerUsageCapBinding(capConsume),
+        })
+      );
+      const serializedLogs = consoleLog.mock.calls
+        .map(([entry]) => String(entry))
+        .join("\n");
+      const event = JSON.parse(
+        String(consoleLog.mock.calls.at(-1)?.[0])
+      ) as Record<string, unknown>;
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        error: {
+          code: "server_failure",
+          message: "Coach service is temporarily unavailable.",
+        },
+      });
+      expect(limit).toHaveBeenCalledTimes(1);
+      expect(providerLimit).not.toHaveBeenCalled();
+      expect(capConsume).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(event).toMatchObject({
+        result: "request_limiter_unavailable",
+        publicErrorType: "server_failure",
+        providerInvocationAttempted: false,
+      });
+      expect(event).not.toHaveProperty("providerUsageCapOutcome");
+      expect(event).not.toHaveProperty("actualExternalProvider");
+      expect(event).not.toHaveProperty("experimentId");
+      expect(serializedLogs).not.toContain("RAW_LIMITER_ERROR");
+      expect(serializedLogs).not.toContain(rawIpAddress);
+      expect(serializedLogs).not.toContain(rawLimiterKey);
+
+      fetchSpy.mockRestore();
+      consoleLog.mockRestore();
+    }
+  );
+
+  it("fails closed for a present malformed limiter outside production", async () => {
+    const coachService = createTrackingCoachService();
+    const response = await createWorker(coachService).fetch(
+      makeRequest(validRequest),
+      {
+        ENVIRONMENT: "development",
+        COACH_RATE_LIMITER: {
+          async limit() {
+            return {};
+          },
+        } as unknown as RateLimit,
+      }
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: { code: "server_failure" },
+    });
+    expect(coachService.respond).not.toHaveBeenCalled();
+  });
+
+  it("stops before dormant experiment assignment when the request limiter is unavailable", async () => {
+    const providerLimit = vi.fn(async () => ({ success: true }));
+    const capConsume = vi.fn(async (_periodKey: string, cap: number) => ({
+      allowed: true,
+      limit: cap,
+      remaining: cap - 1,
+    }));
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const consoleLog = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
+    const response = await worker.fetch(
+      makeRequest(validRequest, {
+        "X-DJ-Experiment-Cohort":
+          "123e4567-e89b-42d3-a456-426614174000",
+      }),
+      completeExperimentEnv({
+        ENVIRONMENT: "production",
+        COACH_RATE_LIMITER: {
+          async limit() {
+            throw new Error("request limiter unavailable");
+          },
+        } as RateLimit,
+        COACH_PROVIDER_RATE_LIMITER: {
+          limit: providerLimit,
+        } as unknown as RateLimit,
+        COACH_PROVIDER_USAGE_CAP:
+          providerUsageCapBinding(capConsume),
+      })
+    );
+    const event = JSON.parse(
+      String(consoleLog.mock.calls.at(-1)?.[0])
+    ) as Record<string, unknown>;
+
+    expect(response.status).toBe(503);
+    expect(providerLimit).not.toHaveBeenCalled();
+    expect(capConsume).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(event).toMatchObject({
+      providerMode: "mock",
+      result: "request_limiter_unavailable",
+      providerInvocationAttempted: false,
+    });
+    expect(event).not.toHaveProperty("experimentId");
+    expect(event).not.toHaveProperty("assignedProvider");
+
+    fetchSpy.mockRestore();
+    consoleLog.mockRestore();
+  });
+
+  it("allows a missing request limiter outside production", async () => {
+    const coachService = createTrackingCoachService();
+    const response = await createWorker(coachService).fetch(
+      makeRequest(validRequest),
+      {
+        ENVIRONMENT: "development",
+        COACH_PROVIDER: "mock",
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(coachService.respond).toHaveBeenCalledTimes(1);
+  });
+
+  it("continues normally after a valid successful request-limiter result", async () => {
+    const coachService = createTrackingCoachService();
+    const limit = vi.fn(async () => ({ success: true }));
+    const response = await createWorker(coachService).fetch(
+      makeRequest(validRequest),
+      {
+        ENVIRONMENT: "production",
+        COACH_PROVIDER: "mock",
+        COACH_RATE_LIMITER: {
+          limit,
+        } as unknown as RateLimit,
+      }
+    );
+
+    expect(response.status).toBe(200);
+    expect(limit).toHaveBeenCalledTimes(1);
+    expect(coachService.respond).toHaveBeenCalledTimes(1);
   });
 
   it("returns 429 without calling OpenAI when the provider limiter rejects", async () => {

@@ -38,6 +38,7 @@ import {
 import {
   enforceProviderCallGuard,
   enforceRequestRateLimit,
+  RequestLimiterUnavailableError,
 } from "./rateLimit";
 import {
   CoachTelemetryResultCategory,
@@ -227,7 +228,9 @@ async function handleCoachRespond(
     if (error instanceof ApiError) {
       publicErrorType = error.code;
 
-      if (providerUsageCapOutcome === "blocked") {
+      if (error instanceof RequestLimiterUnavailableError) {
+        result = "request_limiter_unavailable";
+      } else if (providerUsageCapOutcome === "blocked") {
         result = "provider_usage_cap_blocked";
       } else if (error.code === "rate_limited") {
         result = "rate_limited";

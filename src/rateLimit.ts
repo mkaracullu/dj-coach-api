@@ -1,7 +1,9 @@
 import { apiError } from "./http/json";
+import { ApiError } from "./http/ApiError";
 import type { CoachProviderId } from "./coach/providerTypes";
 
 export type CoachRateLimitEnv = {
+  ENVIRONMENT?: string;
   COACH_RATE_LIMITER?: RateLimit;
   COACH_PROVIDER_RATE_LIMITER?: RateLimit;
 };
@@ -24,6 +26,17 @@ function providerGuardrailError() {
   );
 }
 
+export class RequestLimiterUnavailableError extends ApiError {
+  constructor() {
+    super(
+      "server_failure",
+      "Coach service is temporarily unavailable.",
+      503
+    );
+    this.name = "RequestLimiterUnavailableError";
+  }
+}
+
 function isRateLimitOutcome(
   value: unknown
 ): value is { success: boolean } {
@@ -39,13 +52,31 @@ export async function enforceRequestRateLimit(
   env: CoachRateLimitEnv
 ): Promise<void> {
   if (!env.COACH_RATE_LIMITER) {
+    if (env.ENVIRONMENT === "production") {
+      throw new RequestLimiterUnavailableError();
+    }
+
     return;
   }
 
   const key = getRateLimitIdentity(request);
-  const result = await env.COACH_RATE_LIMITER.limit({ key: `coach:${key}` });
+  let requestAllowed: boolean;
 
-  if (!result.success) {
+  try {
+    const result: unknown = await env.COACH_RATE_LIMITER.limit({
+      key: `coach:${key}`,
+    });
+
+    if (!isRateLimitOutcome(result)) {
+      throw new Error("Invalid request rate-limit outcome.");
+    }
+
+    requestAllowed = result.success;
+  } catch {
+    throw new RequestLimiterUnavailableError();
+  }
+
+  if (!requestAllowed) {
     throw apiError(
       "rate_limited",
       "Coach request rate limit was reached.",

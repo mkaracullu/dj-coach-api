@@ -17,6 +17,7 @@ export type CoachTelemetryResultCategory =
   | "validation_error"
   | "scope_reject"
   | "rate_limited"
+  | "request_limiter_unavailable"
   | "provider_guardrail_blocked"
   | "provider_usage_cap_blocked"
   | "provider_fallback"
