@@ -8,7 +8,7 @@ Provider-neutral Cloudflare Workers backend for DJ Lingo’s text-based Coach ca
 
 Current stage:
 
-**Planning and Runtime Readiness**
+**Real-User Activation Readiness**
 
 OpenAI is selected as DJ Lingo’s initial production provider for the text-based Coach capability.
 
@@ -16,12 +16,15 @@ Selection does not mean activation.
 
 Current runtime state:
 
-* checked-in provider mode: `mock`;
-* deployed provider mode: `mock`;
-* deployed Worker: `dj-coach-api`;
-* deployed environment value: `development`;
+* checked-in development provider mode: `mock`;
+* deployed development provider mode: `mock`;
+* deployed development Worker: `dj-coach-api`;
+* deployed development environment value: `development`;
+* checked-in production provider mode: `mock`;
+* production Worker identity: `dj-coach-api-production`;
+* production Worker deployment: not yet created or authorized;
 * real-user OpenAI traffic: inactive;
-* OpenAI production smoke: not yet authorized;
+* controlled OpenAI synthetic and real-iPhone verification: passed against the development Worker and rolled back;
 * Anthropic production traffic: inactive;
 * provider experiment routing: dormant;
 * mobile provider-experiment cohort transport: disabled;
@@ -265,9 +268,47 @@ The raw cohort value must never be:
 * recorded in telemetry;
 * used for authentication, billing, entitlements or rate limiting.
 
+## Environment Boundaries
+
+The top-level Wrangler configuration remains the existing development Worker:
+
+```text
+Worker: dj-coach-api
+workers.dev endpoint: https://dj-coach-api.aidj-coach.workers.dev
+ENVIRONMENT=development
+COACH_PROVIDER=mock
+```
+
+The named `production` environment is a distinct Worker:
+
+```text
+Wrangler environment: production
+Worker: dj-coach-api-production
+workers.dev endpoint: https://dj-coach-api-production.aidj-coach.workers.dev
+ENVIRONMENT=production
+COACH_PROVIDER=mock
+```
+
+Wrangler names a named environment `<top-level-name>-<environment-name>`.
+All production operations must therefore include `--env production`.
+Development operations should include `--env=""` to target the top-level
+development Worker explicitly.
+
+Cloudflare keeps the two Workers' versions, deployments, variables, secrets and
+rate-limit bindings separate. The production environment does not inherit the
+top-level `vars` or rate-limit bindings; both are declared explicitly in
+`wrangler.jsonc`.
+
+`ENVIRONMENT` is currently informational. Source code accepts the binding but
+does not branch on it. Isolation is provided by the distinct Worker,
+environment-specific configuration, secrets and limiter namespaces.
+
+No custom route or domain is configured. The separate `workers.dev` endpoint is
+the accepted initial production endpoint.
+
 ## Rate-Limit Bindings
 
-The Worker uses two independent Cloudflare Rate Limiting bindings.
+Each Worker uses two independent Cloudflare Rate Limiting bindings.
 
 ### Request-level limiter
 
@@ -275,10 +316,18 @@ The Worker uses two independent Cloudflare Rate Limiting bindings.
 COACH_RATE_LIMITER
 ```
 
-Current deployed configuration:
+Development configuration:
 
 ```text
 namespace: 1001
+limit: 10
+period: 60 seconds
+```
+
+Production configuration:
+
+```text
+namespace: 2001
 limit: 10
 period: 60 seconds
 ```
@@ -289,13 +338,26 @@ period: 60 seconds
 COACH_PROVIDER_RATE_LIMITER
 ```
 
-Current deployed configuration:
+Development configuration:
 
 ```text
 namespace: 1002
 limit: 5
 period: 60 seconds
 ```
+
+Production configuration:
+
+```text
+namespace: 2002
+limit: 5
+period: 60 seconds
+```
+
+Cloudflare rate-limit namespace IDs are account-wide positive integer
+identifiers. Reusing an ID across Workers shares counters. The production IDs
+must therefore be confirmed as unused in the target account before the first
+production upload.
 
 The external-provider guard is mandatory for OpenAI and Anthropic runtime calls.
 
@@ -312,7 +374,7 @@ Mock mode remains usable without an external-provider call.
 
 The provider limiter is a short-window cost and abuse guard. It is not a global daily budget counter.
 
-## Current Deployed State
+## Current Development Deployment
 
 Worker:
 
@@ -360,11 +422,45 @@ ANTHROPIC_API_KEY: absent
 COACH_EXPERIMENT_ASSIGNMENT_SECRET: absent
 ```
 
-The active version is the primary known rollback target for Sprint 3B.6.
+The active version is the guarded development rollback target for Sprint 3B.6.
+
+This development deployment, its bindings and guarded mock rollback version
+must not be changed by production operations.
+
+## Checked-In Production Baseline
+
+The production environment exists only in repository configuration until an
+explicitly authorized Cloudflare operation creates it.
+
+Checked-in production configuration:
+
+```text
+Wrangler environment: production
+Worker: dj-coach-api-production
+workers_dev: true
+ENVIRONMENT=production
+COACH_PROVIDER=mock
+COACH_RATE_LIMITER namespace: 2001, 10/60s
+COACH_PROVIDER_RATE_LIMITER namespace: 2002, 5/60s
+```
+
+The production configuration contains no:
+
+* provider API key;
+* OpenAI model or token variable;
+* Anthropic variable or secret;
+* provider-experiment variable or assignment secret;
+* custom route;
+* cross-provider fallback configuration.
+
+Production must first be uploaded and deployed in mock mode. The first accepted
+production mock version ID becomes the authoritative production rollback
+target. It must be recorded as `<PRODUCTION_MOCK_VERSION_ID>` in the operational
+record before any later OpenAI-configured production version is deployed.
 
 ## Read-Only Runtime Preflight
 
-Before any authorized deployment, re-run read-only checks to detect configuration drift.
+Before any production operation, re-run read-only checks to detect configuration drift.
 
 Repository state:
 
@@ -384,18 +480,42 @@ npx wrangler whoami --json
 Active deployments and versions:
 
 ```bash
-npx wrangler deployments list --json
-npx wrangler deployments status --json
-npx wrangler versions list --json
-npx wrangler versions view 9729512a-d5d6-4f3a-aaa3-cc93678d1e9d --json
+npx wrangler deployments list --env="" --json
+npx wrangler deployments status --env="" --json
+npx wrangler versions list --env="" --json
+npx wrangler versions view 9729512a-d5d6-4f3a-aaa3-cc93678d1e9d --env="" --json
 ```
 
 Secret names only:
 
 ```bash
-npx wrangler secret list --format json
-npx wrangler versions secret list
+npx wrangler secret list --env="" --format json
+npx wrangler versions secret list --env="" --latest-version
 ```
+
+Production configuration validation without upload or deployment:
+
+```bash
+npx wrangler versions upload \
+  --env production \
+  --dry-run \
+  --outdir /tmp/dj-coach-api-production-dry-run
+```
+
+After the production Worker has been created through a separately authorized
+mock deployment, inspect only the production target with:
+
+```bash
+npx wrangler deployments list --env production --json
+npx wrangler deployments status --env production --json
+npx wrangler versions list --env production --json
+npx wrangler versions view <PRODUCTION_VERSION_ID> --env production --json
+npx wrangler secret list --env production --format json
+npx wrangler versions secret list --env production --latest-version
+```
+
+The `--env production` flag is mandatory. These commands target
+`dj-coach-api-production`; use `--env=""` to target `dj-coach-api` explicitly.
 
 Never print:
 
@@ -421,11 +541,12 @@ The stages are:
 
 Completion of one stage does not authorize the next stage.
 
-### Locked planning decisions
+### Current environment decisions
 
-* use the existing `dj-coach-api` Worker for the bounded synthetic smoke;
-* retain `ENVIRONMENT=development` for the controlled internal smoke;
-* defer development/staging/production separation until real-user activation readiness;
+* preserve the existing `dj-coach-api` development Worker and guarded mock version;
+* use the named `production` environment for the distinct `dj-coach-api-production` Worker;
+* deploy production in mock mode before any provider secret or OpenAI-configured version;
+* use production limiter namespaces `2001` and `2002`, separate from development `1001` and `1002`;
 * pin `OPENAI_MODEL` to `gpt-5.4-mini-2026-03-17`;
 * use `OPENAI_MAX_OUTPUT_TOKENS=400`;
 * use staged Cloudflare version operations;
@@ -435,16 +556,72 @@ Completion of one stage does not authorize the next stage.
 * keep mobile cohort transport disabled;
 * keep Anthropic disabled;
 * keep cross-provider fallback disabled;
-* use version `9729512a-d5d6-4f3a-aaa3-cc93678d1e9d` as the primary guarded mock rollback target;
+* keep development version `9729512a-d5d6-4f3a-aaa3-cc93678d1e9d` as the development-only guarded mock rollback target;
+* record the first accepted production mock version as the separate production rollback target;
 * synthetic smoke success must not authorize real-user traffic.
 
-## Staged Secret Preparation
+## Production Mock Baseline Upload and Deployment
 
-The approved command shape for a future staged secret operation is:
+Creating the production environment configuration does not create a remote
+Worker. The first remote production operation must be a reviewed mock baseline upload:
+
+```bash
+npx wrangler versions upload \
+  --env production \
+  --message "<AUTHORIZED_PRODUCTION_MOCK_VERSION_MESSAGE>" \
+  --tag "<AUTHORIZED_PRODUCTION_MOCK_TAG>"
+```
+
+Inspect the returned version before moving traffic:
+
+```bash
+npx wrangler versions view \
+  <PRODUCTION_MOCK_VERSION_ID> \
+  --env production \
+  --json
+```
+
+The version must show:
+
+```text
+ENVIRONMENT=production
+COACH_PROVIDER=mock
+COACH_RATE_LIMITER namespace=2001, limit=10, period=60
+COACH_PROVIDER_RATE_LIMITER namespace=2002, limit=5, period=60
+```
+
+It must contain no provider or experiment secret and no OpenAI, Anthropic or
+experiment variable.
+
+Deploying the first production mock version is a separate operational step:
+
+```bash
+npx wrangler versions deploy \
+  <PRODUCTION_MOCK_VERSION_ID>@100% \
+  --env production \
+  --message "<AUTHORIZED_PRODUCTION_MOCK_DEPLOYMENT_MESSAGE>" \
+  --yes
+```
+
+After deployment, record `<PRODUCTION_MOCK_VERSION_ID>` as the authoritative
+production rollback target and confirm:
+
+```bash
+npx wrangler deployments status --env production --json
+npx wrangler versions view <PRODUCTION_MOCK_VERSION_ID> --env production --json
+```
+
+The production mock deployment does not authorize OpenAI, provider calls,
+mobile traffic or real-user traffic.
+
+## Production Staged Secret Preparation
+
+Only after the production mock baseline is accepted may the production OpenAI secret be prepared:
+prepare the production OpenAI secret:
 
 ```bash
 npx wrangler versions secret put OPENAI_API_KEY \
-  --name dj-coach-api \
+  --env production \
   --message "<AUTHORIZED_SECRET_VERSION_MESSAGE>" \
   --tag "<AUTHORIZED_TAG>"
 ```
@@ -460,34 +637,32 @@ The value must never appear:
 * in chat;
 * in logs.
 
-This command must not be executed without explicit authorization.
-
 After the operation:
 
 * capture the generated version ID;
 * inspect the generated version through a read-only Wrangler command;
 * confirm only the secret name, not its value;
 * confirm no traffic was moved;
-* confirm the active deployment remains the guarded mock version.
+* confirm the active production deployment remains
+  `<PRODUCTION_MOCK_VERSION_ID>`.
 
 Secret presence alone does not activate OpenAI while the active provider mode remains `mock`.
+It does not authorize OpenAI or a provider call.
 
-## Staged OpenAI Version Upload
+## Future Production OpenAI Version Upload
 
-The planned command shape for a future OpenAI-configured version upload is:
+The planned command shape for a future OpenAI-configured production version is:
 
 ```bash
 npx wrangler versions upload \
-  --name dj-coach-api \
-  --var ENVIRONMENT:development \
+  --env production \
+  --var ENVIRONMENT:production \
   --var COACH_PROVIDER:openai \
   --var OPENAI_MODEL:gpt-5.4-mini-2026-03-17 \
   --var OPENAI_MAX_OUTPUT_TOKENS:400 \
   --message "<AUTHORIZED_VERSION_MESSAGE>" \
   --tag "<AUTHORIZED_TAG>"
 ```
-
-This command must not be executed without explicit authorization.
 
 `--keep-vars` must not be added.
 
@@ -510,37 +685,33 @@ After upload:
 
 If the final staged version does not contain the expected secret and bindings, stop. Do not deploy it.
 
-## Authorized Version Deployment
+## Future Production Version Deployment
 
-Deployment is a separate authorization from secret preparation and version upload.
+Deployment is a separate operational step from secret preparation and version upload.
 
 Planned command shape:
 
 ```bash
 npx wrangler versions deploy <NEW_VERSION_ID>@100% \
-  --name dj-coach-api \
+  --env production \
   --message "<AUTHORIZED_DEPLOYMENT_MESSAGE>" \
   --yes
 ```
 
-Before deployment, authorization must specify:
+Before deployment, the local deployment checklist must confirm:
 
 * provider;
 * exact model;
-* exact version ID;
+* locally verified version ID;
 * exact Worker/account target;
 * output-token ceiling;
-* request count;
-* retry count;
-* maximum spend;
-* allowed synthetic request or fixture IDs;
+* active bindings;
 * success conditions;
 * stop conditions;
-* rollback action;
-* whether internal tester traffic is included;
-* whether real-user traffic is included.
+* rollback target;
+* whether any real-user traffic is included.
 
-Deployment authorization does not automatically authorize a provider call.
+A deployment does not itself authorize a paid provider request.
 
 ## Synthetic Smoke Boundary
 
@@ -598,31 +769,34 @@ Stop immediately on:
 
 A successful synthetic smoke does not authorize real-user traffic.
 
-## Rollback-to-Mock
+## Production Rollback-to-Mock
 
-Primary rollback target:
+Primary production rollback target:
 
 ```text
-9729512a-d5d6-4f3a-aaa3-cc93678d1e9d
+<PRODUCTION_MOCK_VERSION_ID>
 ```
 
-Planned rollback command:
+The production target is recorded only after the first authorized production
+mock deployment. Do not use the development rollback version for production.
+
+Planned production rollback command:
 
 ```bash
 npx wrangler rollback \
-  9729512a-d5d6-4f3a-aaa3-cc93678d1e9d \
-  --name dj-coach-api \
+  <PRODUCTION_MOCK_VERSION_ID> \
+  --env production \
   --message "<ROLLBACK_REASON>" \
   --yes
 ```
 
-This command must not be executed without explicit authorization unless an already-authorized emergency rollback condition has been reached.
+Rollback may be executed immediately when a stop condition is reached or when returning the environment to its accepted mock baseline. It does not require a separate approval.
 
 Expected rollback result:
 
 * 100% traffic returns to the guarded mock version;
 * `COACH_PROVIDER=mock`;
-* `ENVIRONMENT=development`;
+* `ENVIRONMENT=production`;
 * both rate-limit bindings restored;
 * external provider invocation disabled;
 * no experiment variables active.
@@ -635,21 +809,25 @@ After rollback, verify through read-only commands:
 * bindings;
 * no external provider attempt.
 
-Secondary fallback:
+Secondary production fallback:
 
 ```bash
-npm run deploy
+npx wrangler deploy --env production
 ```
 
-This redeploys the current checked-in mock configuration as a new version.
+This directly deploys the current checked-in production mock configuration as a
+new version.It is not the preferred staged path and should be used only when the recorded production mock version is unavailable or unsuitable.
 
-The recorded guarded mock version is the preferred deterministic rollback target.
+The recorded production mock version is the preferred deterministic production
+rollback target. The development target
+`9729512a-d5d6-4f3a-aaa3-cc93678d1e9d` remains unchanged and applies only to
+`dj-coach-api`.
 
 ## Real-iPhone Verification
 
-Real-iPhone remote Coach verification is a later Sprint 3B.6 stage.
+Real-iPhone remote Coach verification was completed in Sprint 3B.6 Stage 4.
 
-It must confirm:
+The accepted verification evidence covers:
 
 * Session 2 suggested questions;
 * Session 7 suggested questions;
@@ -676,7 +854,7 @@ Before real-user OpenAI traffic, DJ Lingo must define or implement:
 
 * trusted environment or daily provider-budget control;
 * explicit operational ownership;
-* accepted development/staging/production separation;
+* accepted development/production separation;
 * more precise sanitized provider failure telemetry;
 * effective-provider versus deterministic-fallback outcome telemetry;
 * runtime provider latency visibility;
