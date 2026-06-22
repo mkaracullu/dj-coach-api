@@ -13,6 +13,53 @@ export type CoachProviderUsage = {
   totalTokens: number;
 };
 
+function isValidTokenCount(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+  );
+}
+
+export function normalizeCoachProviderUsage(
+  inputTokens: unknown,
+  outputTokens: unknown,
+  totalTokens?: unknown
+): CoachProviderUsage | null {
+  if (
+    !isValidTokenCount(inputTokens) ||
+    !isValidTokenCount(outputTokens)
+  ) {
+    return null;
+  }
+
+  const derivedTotal = inputTokens + outputTokens;
+
+  if (!Number.isSafeInteger(derivedTotal)) {
+    return null;
+  }
+
+  if (
+    totalTokens !== undefined &&
+    (!isValidTokenCount(totalTokens) || totalTokens < derivedTotal)
+  ) {
+    return null;
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens:
+      totalTokens === undefined ? derivedTotal : totalTokens,
+  };
+}
+
+export type CoachProviderExecutionMetadata = {
+  provider: CoachProviderId;
+  latencyMs: number;
+  usage: CoachProviderUsage | null;
+};
+
 export type CoachProviderErrorCategory =
   | "timeout"
   | "http_error"

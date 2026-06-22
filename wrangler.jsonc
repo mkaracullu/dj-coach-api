@@ -10,6 +10,20 @@
     "ENVIRONMENT": "development",
     "COACH_PROVIDER": "mock"
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "COACH_PROVIDER_USAGE_CAP",
+        "class_name": "ProviderUsageCap"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "provider-usage-cap-v1",
+      "new_sqlite_classes": ["ProviderUsageCap"]
+    }
+  ],
   "ratelimits": [
     {
       "name": "COACH_RATE_LIMITER",
@@ -35,6 +49,20 @@
         "ENVIRONMENT": "production",
         "COACH_PROVIDER": "mock"
       },
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "COACH_PROVIDER_USAGE_CAP",
+            "class_name": "ProviderUsageCap"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "provider-usage-cap-v1",
+          "new_sqlite_classes": ["ProviderUsageCap"]
+        }
+      ],
       "ratelimits": [
         {
           "name": "COACH_RATE_LIMITER",

@@ -12,6 +12,7 @@ import type { OpenAiCoachConfig } from "./providerConfig";
 import {
   buildCoachProviderSafeDiagnostics,
   CoachProviderError,
+  normalizeCoachProviderUsage,
   type CoachProviderErrorCategory,
   type CoachProviderResult,
   type CoachProviderSafeDiagnostics,
@@ -49,15 +50,11 @@ function readUsage(value: Record<string, unknown>): OpenAiProviderUsage | null {
   const outputTokens = value.usage.output_tokens;
   const totalTokens = value.usage.total_tokens;
 
-  if (
-    typeof inputTokens !== "number" ||
-    typeof outputTokens !== "number" ||
-    typeof totalTokens !== "number"
-  ) {
-    return null;
-  }
-
-  return { inputTokens, outputTokens, totalTokens };
+  return normalizeCoachProviderUsage(
+    inputTokens,
+    outputTokens,
+    totalTokens
+  );
 }
 
 function readOutputText(
@@ -151,10 +148,10 @@ export class OpenAiCoachService implements CoachService {
   async respondWithMetadata(
     request: CoachApiRequestV1
   ): Promise<OpenAiCoachResult> {
+    const startedAt = Date.now();
     const prompt = buildCoachPrompt(request);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
-    const startedAt = Date.now();
     let providerResponse: Response;
 
     try {

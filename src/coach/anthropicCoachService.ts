@@ -10,6 +10,7 @@ import {
 import {
   buildCoachProviderSafeDiagnostics,
   CoachProviderError,
+  normalizeCoachProviderUsage,
   type CoachProviderErrorCategory,
   type CoachProviderResult,
   type CoachProviderSafeDiagnostics,
@@ -49,18 +50,7 @@ function readUsage(
   const inputTokens = value.usage.input_tokens;
   const outputTokens = value.usage.output_tokens;
 
-  if (
-    typeof inputTokens !== "number" ||
-    typeof outputTokens !== "number"
-  ) {
-    return null;
-  }
-
-  return {
-    inputTokens,
-    outputTokens,
-    totalTokens: inputTokens + outputTokens,
-  };
+  return normalizeCoachProviderUsage(inputTokens, outputTokens);
 }
 
 function parseProviderResponse(
@@ -153,10 +143,10 @@ export class AnthropicCoachService implements CoachService {
   async respondWithMetadata(
     request: CoachApiRequestV1
   ): Promise<AnthropicCoachResult> {
+    const startedAt = Date.now();
     const prompt = buildCoachPrompt(request);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs);
-    const startedAt = Date.now();
     let providerResponse: Response;
 
     try {

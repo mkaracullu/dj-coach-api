@@ -22,7 +22,7 @@ Current runtime state:
 * deployed development environment value: `development`;
 * checked-in production provider mode: `mock`;
 * production Worker identity: `dj-coach-api-production`;
-* production Worker deployment: not yet created or authorized;
+* production Worker deployment: not yet created;
 * real-user OpenAI traffic: inactive;
 * controlled OpenAI synthetic and real-iPhone verification: passed against the development Worker and rolled back;
 * Anthropic production traffic: inactive;
@@ -96,17 +96,16 @@ The accepted runtime order is:
 4. Enforce product scope.
 5. Apply the request-level limiter.
 6. Resolve provider mode or experiment assignment.
-7. Apply the external-provider guard when an external provider is selected.
-8. Invoke the selected `CoachService`.
-9. Parse and structurally validate provider output.
-10. Validate the backend Coach response contract.
-11. Validate request-ID equality.
-12. Apply runtime semantic safety.
-13. Use deterministic mock fallback on provider or safety failure.
-14. Return the validated provider-neutral response.
-15. Emit sanitized `coach_request_completed` telemetry.
+7. Apply the short-window external-provider guard when an external provider is selected.
+8. Atomically consume one global provider-call allowance.
+9. Invoke the selected external provider exactly once.
+10. Parse and structurally validate provider output.
+11. Validate the backend Coach response contract and runtime semantic safety.
+12. Use deterministic mock fallback when required, return the provider-neutral response and emit sanitized `coach_request_completed` telemetry.
 
-Product-scope rejection occurs before experiment assignment, external-provider guardrails or provider invocation.
+The global allowance is consumed immediately before the external invocation
+attempt. Product-scope, request-limiter and short-window provider-guard
+rejections occur before global allowance consumption.
 
 ## Runtime Safety
 
@@ -374,6 +373,126 @@ Mock mode remains usable without an external-provider call.
 
 The provider limiter is a short-window cost and abuse guard. It is not a global daily budget counter.
 
+## Global Provider-Call Cap
+
+`COACH_PROVIDER_USAGE_CAP` is a SQLite-backed Durable Object binding. Each
+Worker environment routes all external-provider attempts to one deterministic
+object named `environment-wide-provider-calls`.
+
+The application layer depends on an infrastructure-neutral
+`ProviderUsageCapPort`. That contract contains only the UTC period key,
+configured call limit and allowed/blocked allowance result. It has no
+Cloudflare, Durable Object, SQLite, Wrangler or provider-specific dependency.
+
+The current infrastructure adapter implements that port with a Cloudflare
+Durable Object and SQLite storage. Another infrastructure could implement the
+same port later without changing the Coach request flow. DynamoDB is one
+possible future adapter example, not an accepted migration plan; this repository
+contains no AWS implementation or configuration.
+
+The cap guarantees:
+
+* one atomic allowance decision across the Worker environment;
+* deterministic enforcement under concurrent requests;
+* one consumed allowance immediately before each external-provider attempt;
+* failed, timed-out or fallback-producing provider attempts remain consumed;
+* no consumption for mock responses, scope rejection, request-rate rejection or
+  short-window provider-guard rejection;
+* fail-closed behavior when the binding, configured limit or returned result is
+  missing, malformed or unavailable.
+
+The cap is shared across OpenAI, Anthropic and any experiment-selected external
+provider. It counts provider attempts, not requests and not successful
+responses. There are no automatic provider retries or cross-provider fallback.
+
+Configuration:
+
+```text
+COACH_PROVIDER_DAILY_CALL_LIMIT=<POSITIVE_DAILY_CALL_LIMIT>
+```
+
+There is deliberately no checked-in default. External-provider modes fail
+closed unless the value is an explicit positive safe integer and the Durable
+Object binding is available. Mock mode does not require the value or consume
+the cap.
+
+Reset semantics:
+
+* period: UTC calendar day;
+* period key: `YYYY-MM-DD`;
+* boundary: `00:00:00 UTC`;
+* the current row is updated in a synchronous SQLite transaction;
+* obsolete day rows are deleted during the next consumption attempt;
+* concurrent attempts for the same environment are serialized by the Durable
+  Object and transaction;
+* changing the configured limit changes the ceiling applied to the existing
+  current-day count; it does not reset usage.
+
+Development and production use distinct Durable Object namespaces because
+`dj-coach-api` and `dj-coach-api-production` are separate Worker environments
+with separately declared bindings and migrations.
+
+The development migration is also currently unapplied. A future development
+deployment containing this class must use a direct mock deployment once before
+version-only uploads can resume. This repository change does not alter the
+currently deployed development Worker.
+
+The Durable Object stores only the UTC period key and consumed call count. It
+does not store user, profile, lesson, request, response, Session 7, IP, prompt,
+provider-output, token or billing data. A future infrastructure cutover may
+start a fresh operational daily counter or transfer only the active UTC day's
+count; there is no current user or product data to migrate from this store.
+
+This is a call-count ceiling. It is not a money-denominated budget, token budget,
+provider billing ledger or substitute for an OpenAI project budget.
+
+## Provider Usage Telemetry
+
+The existing `coach_request_completed` structured event may now include these
+allowlisted fields:
+
+```text
+providerUsageCapOutcome: allowed | blocked | unavailable
+providerUsageCapLimit
+providerUsageCapRemaining
+providerLatencyMs
+providerInputTokens
+providerOutputTokens
+providerTotalTokens
+```
+
+Provider latency covers the external-provider operation rather than total route
+latency. Token fields are emitted only when provider metadata contains finite,
+non-negative safe integers. A missing or invalid usage object produces no token
+fields. Anthropic total tokens are safely derived from valid input and output
+counts; OpenAI total tokens are accepted when valid and not lower than their
+sum.
+
+Telemetry never includes prompts, provider output, response bodies, request
+bodies, learner context, API keys, authorization headers, raw exceptions,
+unrestricted provider metadata or raw cohort identifiers.
+
+No runtime pricing metadata has been accepted into the repository. Estimated
+cost is therefore not emitted. Token telemetry may differ from final provider
+billing and must not be treated as an invoice or a spend limit.
+
+There is no public cap-inspection or mutation endpoint. During an operational
+observation window, inspect only structured Worker logs:
+
+```bash
+npx wrangler tail --env production --format json
+```
+
+Use `providerUsageCapOutcome`, `providerUsageCapLimit` and
+`providerUsageCapRemaining`; do not inspect or expose learner payloads. The
+remaining value is an accurate post-consumption snapshot for that serialized
+decision, but a later request may consume another allowance before the log is
+read.
+
+The OpenAI account or project must retain a separately verified provider-side
+budget or usage control. That external control cannot be established or
+verified from this repository.
+
 ## Current Development Deployment
 
 Worker:
@@ -429,8 +548,8 @@ must not be changed by production operations.
 
 ## Checked-In Production Baseline
 
-The production environment exists only in repository configuration until an
-explicitly authorized Cloudflare operation creates it.
+The production environment exists only in repository configuration until a
+Cloudflare deployment creates it.
 
 Checked-in production configuration:
 
@@ -442,6 +561,8 @@ ENVIRONMENT=production
 COACH_PROVIDER=mock
 COACH_RATE_LIMITER namespace: 2001, 10/60s
 COACH_PROVIDER_RATE_LIMITER namespace: 2002, 5/60s
+COACH_PROVIDER_USAGE_CAP class: ProviderUsageCap
+Durable Object migration: provider-usage-cap-v1
 ```
 
 The production configuration contains no:
@@ -453,7 +574,11 @@ The production configuration contains no:
 * custom route;
 * cross-provider fallback configuration.
 
-Production must first be uploaded and deployed in mock mode. The first accepted
+`COACH_PROVIDER_DAILY_CALL_LIMIT` is also absent from the checked-in mock
+baseline. It must be selected as an explicit operational rollout decision on a
+future external-provider version.
+
+Production must first be deployed in mock mode. The first accepted
 production mock version ID becomes the authoritative production rollback
 target. It must be recorded as `<PRODUCTION_MOCK_VERSION_ID>` in the operational
 record before any later OpenAI-configured production version is deployed.
@@ -496,14 +621,14 @@ npx wrangler versions secret list --env="" --latest-version
 Production configuration validation without upload or deployment:
 
 ```bash
-npx wrangler versions upload \
+npx wrangler deploy \
   --env production \
   --dry-run \
   --outdir /tmp/dj-coach-api-production-dry-run
 ```
 
-After the production Worker has been created through a separately authorized
-mock deployment, inspect only the production target with:
+After the production Worker has been created through the mock baseline
+deployment, inspect only the production target with:
 
 ```bash
 npx wrangler deployments list --env production --json
@@ -541,6 +666,12 @@ The stages are:
 
 Completion of one stage does not authorize the next stage.
 
+Read-only validation, version upload, deployment, mock-baseline creation and
+rollback are ordinary operational actions and do not require separate
+paid-provider approval. Paid provider requests, live provider evaluations and
+real-user provider traffic require explicit approval. Uploading or deploying
+configuration does not itself authorize a provider call.
+
 ### Current environment decisions
 
 * preserve the existing `dj-coach-api` development Worker and guarded mock version;
@@ -549,7 +680,7 @@ Completion of one stage does not authorize the next stage.
 * use production limiter namespaces `2001` and `2002`, separate from development `1001` and `1002`;
 * pin `OPENAI_MODEL` to `gpt-5.4-mini-2026-03-17`;
 * use `OPENAI_MAX_OUTPUT_TOKENS=400`;
-* use staged Cloudflare version operations;
+* use staged Cloudflare version operations after the initial Durable Object migration;
 * use `wrangler versions secret put`, not immediate `wrangler secret put`;
 * do not use `--keep-vars`;
 * keep provider experiment variables absent;
@@ -560,19 +691,30 @@ Completion of one stage does not authorize the next stage.
 * record the first accepted production mock version as the separate production rollback target;
 * synthetic smoke success must not authorize real-user traffic.
 
-## Production Mock Baseline Upload and Deployment
+## Production Mock Baseline and Durable Object Migration
 
 Creating the production environment configuration does not create a remote
-Worker. The first remote production operation must be a reviewed mock baseline upload:
+Worker or Durable Object namespace.
+
+Cloudflare does not allow a version-only upload to introduce a new Durable
+Object migration. The first production operation must therefore be
+a direct mock deployment that creates `dj-coach-api-production`, applies
+`provider-usage-cap-v1` and creates its isolated SQLite-backed Durable Object
+namespace:
 
 ```bash
-npx wrangler versions upload \
+npx wrangler deploy \
   --env production \
-  --message "<AUTHORIZED_PRODUCTION_MOCK_VERSION_MESSAGE>" \
-  --tag "<AUTHORIZED_PRODUCTION_MOCK_TAG>"
+  --message "<PRODUCTION_MOCK_VERSION_MESSAGE>" \
+  --tag "<PRODUCTION_MOCK_TAG>"
 ```
 
-Inspect the returned version before moving traffic:
+This remote operation creates the Worker and initial Durable Object migration,
+so its account target and irreversible migration intent must be reviewed first.
+It does not require paid-provider authorization, remains mock-only and does not
+make an OpenAI call or authorize provider, mobile or real-user traffic.
+
+Capture the deployed version ID and inspect it:
 
 ```bash
 npx wrangler versions view \
@@ -588,20 +730,13 @@ ENVIRONMENT=production
 COACH_PROVIDER=mock
 COACH_RATE_LIMITER namespace=2001, limit=10, period=60
 COACH_PROVIDER_RATE_LIMITER namespace=2002, limit=5, period=60
+COACH_PROVIDER_USAGE_CAP class=ProviderUsageCap
+Durable Object migration=provider-usage-cap-v1
 ```
 
 It must contain no provider or experiment secret and no OpenAI, Anthropic or
-experiment variable.
-
-Deploying the first production mock version is a separate operational step:
-
-```bash
-npx wrangler versions deploy \
-  <PRODUCTION_MOCK_VERSION_ID>@100% \
-  --env production \
-  --message "<AUTHORIZED_PRODUCTION_MOCK_DEPLOYMENT_MESSAGE>" \
-  --yes
-```
+experiment variable. `COACH_PROVIDER_DAILY_CALL_LIMIT` remains absent in mock
+mode.
 
 After deployment, record `<PRODUCTION_MOCK_VERSION_ID>` as the authoritative
 production rollback target and confirm:
@@ -614,16 +749,19 @@ npx wrangler versions view <PRODUCTION_MOCK_VERSION_ID> --env production --json
 The production mock deployment does not authorize OpenAI, provider calls,
 mobile traffic or real-user traffic.
 
+After this migration has been applied, subsequent configuration changes may use
+the staged `wrangler versions upload` and `wrangler versions deploy` flow.
+
 ## Production Staged Secret Preparation
 
-Only after the production mock baseline is accepted may the production OpenAI secret be prepared:
-prepare the production OpenAI secret:
+Only after the production mock baseline is accepted may the production OpenAI
+secret be prepared:
 
 ```bash
 npx wrangler versions secret put OPENAI_API_KEY \
   --env production \
-  --message "<AUTHORIZED_SECRET_VERSION_MESSAGE>" \
-  --tag "<AUTHORIZED_TAG>"
+  --message "<SECRET_VERSION_MESSAGE>" \
+  --tag "<SECRET_VERSION_TAG>"
 ```
 
 The secret value is entered interactively.
@@ -658,10 +796,11 @@ npx wrangler versions upload \
   --env production \
   --var ENVIRONMENT:production \
   --var COACH_PROVIDER:openai \
+  --var COACH_PROVIDER_DAILY_CALL_LIMIT:<DAILY_CALL_LIMIT> \
   --var OPENAI_MODEL:gpt-5.4-mini-2026-03-17 \
   --var OPENAI_MAX_OUTPUT_TOKENS:400 \
-  --message "<AUTHORIZED_VERSION_MESSAGE>" \
-  --tag "<AUTHORIZED_TAG>"
+  --message "<VERSION_MESSAGE>" \
+  --tag "<VERSION_TAG>"
 ```
 
 `--keep-vars` must not be added.
@@ -670,6 +809,7 @@ Reason:
 
 * required plain variables are provided explicitly;
 * rate-limit bindings remain defined by `wrangler.jsonc`;
+* the Durable Object binding and applied migration remain defined by `wrangler.jsonc`;
 * dormant experiment variables remain absent;
 * Anthropic variables remain absent;
 * unexpected dashboard-managed variables are not preserved.
@@ -679,6 +819,7 @@ After upload:
 * record the new version ID;
 * inspect its non-secret variables;
 * verify both rate-limit bindings;
+* verify `COACH_PROVIDER_USAGE_CAP` and the positive daily limit;
 * verify the OpenAI secret binding is present by name;
 * verify Anthropic and experiment configuration remain absent;
 * verify no traffic moved to the new version.
@@ -694,7 +835,7 @@ Planned command shape:
 ```bash
 npx wrangler versions deploy <NEW_VERSION_ID>@100% \
   --env production \
-  --message "<AUTHORIZED_DEPLOYMENT_MESSAGE>" \
+  --message "<DEPLOYMENT_MESSAGE>" \
   --yes
 ```
 
@@ -777,7 +918,7 @@ Primary production rollback target:
 <PRODUCTION_MOCK_VERSION_ID>
 ```
 
-The production target is recorded only after the first authorized production
+The production target is recorded only after the first production
 mock deployment. Do not use the development rollback version for production.
 
 Planned production rollback command:
@@ -816,7 +957,8 @@ npx wrangler deploy --env production
 ```
 
 This directly deploys the current checked-in production mock configuration as a
-new version.It is not the preferred staged path and should be used only when the recorded production mock version is unavailable or unsuitable.
+new version. It is not the preferred staged path and should be used only when
+the recorded production mock version is unavailable or unsuitable.
 
 The recorded production mock version is the preferred deterministic production
 rollback target. The development target
@@ -852,13 +994,11 @@ Synthetic smoke and internal tester success are not sufficient for real-user act
 
 Before real-user OpenAI traffic, DJ Lingo must define or implement:
 
-* trusted environment or daily provider-budget control;
 * explicit operational ownership;
-* accepted development/production separation;
-* more precise sanitized provider failure telemetry;
-* effective-provider versus deterministic-fallback outcome telemetry;
-* runtime provider latency visibility;
-* runtime usage and cost visibility;
+* an accepted positive production daily call ceiling;
+* provider-side project budget controls verified outside this repository;
+* retained/queryable monitoring and alert thresholds for cap, failure, latency
+  and token telemetry;
 * deterministic request-limiter failure policy;
 * focused Session 2 and Session 7 screen-level remote integration tests;
 * accepted mobile production build/configuration delivery;

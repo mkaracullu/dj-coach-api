@@ -15,7 +15,9 @@ import {
 } from "./providerConfig";
 import {
   CoachProviderError,
+  type CoachProviderExecutionMetadata,
   type CoachProviderErrorCategory,
+  type CoachProviderId,
 } from "./providerTypes";
 import type { CoachResponseValidationFailureCode } from "./coachResponseValidator";
 import type { CoachRuntimeSafetyFailureCode } from "./coachRuntimeSafety";
@@ -35,6 +37,21 @@ export type CoachServiceFallbackResult = {
   responseValidationFailureCode?: CoachResponseValidationFailureCode;
   semanticSafetyFailureCode?: CoachRuntimeSafetyFailureCode;
 };
+
+export type CoachProviderExecutionObserver = (
+  metadata: CoachProviderExecutionMetadata
+) => void;
+
+function observeProviderExecution(
+  observer: CoachProviderExecutionObserver | undefined,
+  metadata: CoachProviderExecutionMetadata
+): void {
+  try {
+    observer?.(metadata);
+  } catch {
+    // Operational metadata must never change the public response or retry a provider.
+  }
+}
 
 export const mockCoachService: CoachService = {
   async respond(request) {
@@ -78,14 +95,37 @@ function buildFallbackResult(error: unknown): CoachServiceFallbackResult {
 }
 
 function withDeterministicFallback(
-  primaryService: CoachService,
-  onFallback?: (result: CoachServiceFallbackResult) => void
+  provider: CoachProviderId,
+  primaryService: {
+    respondWithMetadata(
+      request: CoachApiRequestV1
+    ): Promise<{
+      response: CoachApiSuccessResponseV1;
+      latencyMs: number;
+      usage: CoachProviderExecutionMetadata["usage"];
+    }>;
+  },
+  onFallback?: (result: CoachServiceFallbackResult) => void,
+  onProviderExecution?: CoachProviderExecutionObserver
 ): CoachService {
   return {
     async respond(request) {
+      const startedAt = Date.now();
+
       try {
-        return await primaryService.respond(request);
+        const result = await primaryService.respondWithMetadata(request);
+        observeProviderExecution(onProviderExecution, {
+          provider,
+          latencyMs: Math.max(0, result.latencyMs),
+          usage: result.usage,
+        });
+        return result.response;
       } catch (error) {
+        observeProviderExecution(onProviderExecution, {
+          provider,
+          latencyMs: Math.max(0, Date.now() - startedAt),
+          usage: null,
+        });
         onFallback?.(buildFallbackResult(error));
         return mockCoachService.respond(request);
       }
@@ -96,20 +136,23 @@ function withDeterministicFallback(
 export function createConfiguredCoachService(
   env: CoachProviderEnvironment,
   fetchImplementation: typeof fetch = fetch,
-  onFallback?: (result: CoachServiceFallbackResult) => void
+  onFallback?: (result: CoachServiceFallbackResult) => void,
+  onProviderExecution?: CoachProviderExecutionObserver
 ): CoachService {
   const config = resolveCoachProviderConfig(env);
   return createCoachServiceFromConfig(
     config,
     fetchImplementation,
-    onFallback
+    onFallback,
+    onProviderExecution
   );
 }
 
 export function createCoachServiceFromConfig(
   config: CoachProviderConfig,
   fetchImplementation: typeof fetch = fetch,
-  onFallback?: (result: CoachServiceFallbackResult) => void
+  onFallback?: (result: CoachServiceFallbackResult) => void,
+  onProviderExecution?: CoachProviderExecutionObserver
 ): CoachService {
   if (config.provider === "mock") {
     return mockCoachService;
@@ -121,8 +164,10 @@ export function createCoachServiceFromConfig(
       : new AnthropicCoachService(config, fetchImplementation);
 
   return withDeterministicFallback(
+    config.provider,
     primaryService,
-    onFallback
+    onFallback,
+    onProviderExecution
   );
 }
 

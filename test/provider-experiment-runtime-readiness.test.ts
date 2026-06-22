@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../src/index";
+import { providerUsageCapBinding } from "./providerUsageCapFixtures";
 
 const syntheticCohort = "123e4567-e89b-42d3-a456-426614174000";
 const assignmentSecret = "test-only-assignment-secret-not-production";
@@ -67,6 +68,8 @@ function experimentEnv(
     OPENAI_MODEL: "openai-reference-model",
     ANTHROPIC_API_KEY: "test-anthropic-key-not-real",
     ANTHROPIC_MODEL: "anthropic-reference-model",
+    COACH_PROVIDER_DAILY_CALL_LIMIT: "100",
+    COACH_PROVIDER_USAGE_CAP: providerUsageCapBinding(),
     ...overrides,
   };
 }

@@ -5,6 +5,7 @@ import type {
   CoachApiSuccessResponseV1,
 } from "../src/contracts/CoachApiContract";
 import type { CoachService } from "../src/coach/coachService";
+import { providerUsageCapBinding } from "./providerUsageCapFixtures";
 
 // Keep this external transport shape aligned with the identically named
 // mobile fixture in RemoteCoachService.test.ts.
@@ -80,6 +81,8 @@ function completeOpenAiEnv(
     COACH_PROVIDER: "openai",
     OPENAI_API_KEY: "test-key-not-real",
     OPENAI_MODEL: "reference-model",
+    COACH_PROVIDER_DAILY_CALL_LIMIT: "100",
+    COACH_PROVIDER_USAGE_CAP: providerUsageCapBinding(),
     ...overrides,
   };
 }
@@ -91,6 +94,8 @@ function completeAnthropicEnv(
     COACH_PROVIDER: "anthropic",
     ANTHROPIC_API_KEY: "test-anthropic-key-not-real",
     ANTHROPIC_MODEL: "claude-reference-model",
+    COACH_PROVIDER_DAILY_CALL_LIMIT: "100",
+    COACH_PROVIDER_USAGE_CAP: providerUsageCapBinding(),
     ...overrides,
   };
 }
@@ -110,6 +115,8 @@ function completeExperimentEnv(
     OPENAI_MODEL: "openai-reference-model",
     ANTHROPIC_API_KEY: "test-anthropic-key-not-real",
     ANTHROPIC_MODEL: "anthropic-reference-model",
+    COACH_PROVIDER_DAILY_CALL_LIMIT: "100",
+    COACH_PROVIDER_USAGE_CAP: providerUsageCapBinding(),
     ...overrides,
   };
 }
@@ -847,6 +854,13 @@ describe("DJ Lingo Coach API", () => {
       "semanticSafetyFailureCode",
       "elapsedMs",
       "providerInvocationAttempted",
+      "providerUsageCapOutcome",
+      "providerUsageCapLimit",
+      "providerUsageCapRemaining",
+      "providerLatencyMs",
+      "providerInputTokens",
+      "providerOutputTokens",
+      "providerTotalTokens",
     ]);
 
     for (const [entry] of consoleLog.mock.calls) {
@@ -1260,7 +1274,11 @@ describe("DJ Lingo Coach API", () => {
           "experimentId",
           "experimentVersion",
           "providerInvocationAttempted",
+          "providerLatencyMs",
           "providerMode",
+          "providerUsageCapLimit",
+          "providerUsageCapOutcome",
+          "providerUsageCapRemaining",
           "requestId",
           "result",
           "route",

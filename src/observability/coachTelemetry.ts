@@ -18,6 +18,7 @@ export type CoachTelemetryResultCategory =
   | "scope_reject"
   | "rate_limited"
   | "provider_guardrail_blocked"
+  | "provider_usage_cap_blocked"
   | "provider_fallback"
   | "semantic_safety_fallback"
   | "server_failure";
@@ -35,6 +36,13 @@ export type CoachTelemetryEvent = {
   fallbackReasonId?: CoachFallbackReasonId;
   elapsedMs: number;
   providerInvocationAttempted: boolean;
+  providerUsageCapOutcome?: "allowed" | "blocked" | "unavailable";
+  providerUsageCapLimit?: number;
+  providerUsageCapRemaining?: number;
+  providerLatencyMs?: number;
+  providerInputTokens?: number;
+  providerOutputTokens?: number;
+  providerTotalTokens?: number;
   experimentId?: string;
   experimentVersion?: string;
   assignedProvider?: CoachProviderId;

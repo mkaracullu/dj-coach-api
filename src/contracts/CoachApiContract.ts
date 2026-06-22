@@ -24,14 +24,6 @@ export function isValidCoachRequestId(value: unknown): value is string {
   );
 }
 
-export const coachServerPolicy = {
-  anonymousIpMaxRequestsPerTenMinutes: 10,
-  anonymousIpMaxRequestsPerDay: 50,
-  environmentMaxRequestsPerDay: 500,
-  backendProviderMaxRetryCount: 1,
-  clientAutomaticRetryCount: 0,
-} as const;
-
 export const coachSuggestedQuestionIdValues = [
   "what_should_i_listen_for",
   "what_should_i_focus_on",

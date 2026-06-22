@@ -5,8 +5,9 @@ import {
   CoachSuggestedQuestionId,
 } from "./contracts/CoachApiContract";
 import {
-  CoachService,
-  CoachServiceFallbackResult,
+  type CoachService,
+  type CoachServiceFallbackResult,
+  type CoachProviderExecutionObserver,
   createCoachServiceFromConfig,
   getCoachApiResponse,
 } from "./coach/coachService";
@@ -21,6 +22,7 @@ import {
   resolveCoachExperimentConfig,
 } from "./coach/providerExperiment";
 import type {
+  CoachProviderExecutionMetadata,
   CoachProviderId,
   CoachProviderMode,
 } from "./coach/providerTypes";
@@ -41,10 +43,23 @@ import {
   CoachTelemetryResultCategory,
   emitCoachTelemetry,
 } from "./observability/coachTelemetry";
+import {
+  createCloudflareProviderUsageCapPort,
+  ProviderUsageCap,
+  type CloudflareProviderUsageCapEnvironment,
+} from "./infrastructure/cloudflare/providerUsageCap";
+import {
+  consumeDailyProviderAllowance,
+  ProviderUsageCapReachedError,
+  ProviderUsageCapUnavailableError,
+  type ProviderUsageCapAllowedOutcome,
+  type ProviderUsageCapPort,
+} from "./usageCap/providerUsageCap";
 import { validateCoachProductScope } from "./validation/coachProductScopeValidator";
 import { validateCoachApiRequest } from "./validation/coachRequestValidator";
 
-export type Env = CoachProviderEnvironment & {
+export type Env = CoachProviderEnvironment &
+  CloudflareProviderUsageCapEnvironment & {
   ENVIRONMENT?: string;
   COACH_RATE_LIMITER?: RateLimit;
   COACH_PROVIDER_RATE_LIMITER?: RateLimit;
@@ -58,10 +73,16 @@ export type CoachWorker = {
   ): Promise<Response>;
 };
 
+export type ProviderUsageCapPortFactory = (
+  env: Env
+) => ProviderUsageCapPort | undefined;
+
 async function handleCoachRespond(
   request: Request,
   env: Env,
-  coachService?: CoachService
+  coachService?: CoachService,
+  createProviderUsageCapPort: ProviderUsageCapPortFactory =
+    createCloudflareProviderUsageCapPort
 ): Promise<Response> {
   const startedAt = Date.now();
   const headerRequestId = getSafeRequestIdHeader(request);
@@ -78,6 +99,16 @@ async function handleCoachRespond(
   let experimentVersion: string | undefined;
   let assignedProvider: CoachProviderId | undefined;
   let actualExternalProvider: CoachProviderId | undefined;
+  let providerUsageCapOutcome:
+    | ProviderUsageCapAllowedOutcome["outcome"]
+    | "blocked"
+    | "unavailable"
+    | undefined;
+  let providerUsageCapLimit: number | undefined;
+  let providerUsageCapRemaining: number | undefined;
+  let providerExecutionMetadata:
+    | CoachProviderExecutionMetadata
+    | undefined;
   let fallbackResult: CoachServiceFallbackResult | undefined;
   let stage: "method" | "validation" | "scope" | "guardrail" | "service" =
     "method";
@@ -127,15 +158,61 @@ async function handleCoachRespond(
       providerMode = providerConfig.provider;
     }
 
-    if (isExternalCoachProvider(providerConfig.provider)) {
-      await enforceProviderCallGuard(request, env, providerConfig.provider);
-    }
-
+    const observeProviderExecution: CoachProviderExecutionObserver = (
+      metadata
+    ) => {
+      providerExecutionMetadata = metadata;
+    };
     const service =
       coachService ??
-      createCoachServiceFromConfig(providerConfig, fetch, (fallback) => {
-        fallbackResult = fallback;
-      });
+      createCoachServiceFromConfig(
+        providerConfig,
+        fetch,
+        (fallback) => {
+          fallbackResult = fallback;
+        },
+        observeProviderExecution
+      );
+
+    if (isExternalCoachProvider(providerConfig.provider)) {
+      await enforceProviderCallGuard(request, env, providerConfig.provider);
+      providerUsageCapOutcome = "unavailable";
+
+      try {
+        const capResult = await consumeDailyProviderAllowance(
+          createProviderUsageCapPort(env),
+          env.COACH_PROVIDER_DAILY_CALL_LIMIT
+        );
+        providerUsageCapOutcome = capResult.outcome;
+        providerUsageCapLimit = capResult.limit;
+        providerUsageCapRemaining = capResult.remaining;
+      } catch (error) {
+        if (error instanceof ProviderUsageCapReachedError) {
+          providerUsageCapOutcome = "blocked";
+          providerUsageCapLimit = error.limit;
+          providerUsageCapRemaining = error.remaining;
+        }
+
+        if (error instanceof ProviderUsageCapUnavailableError) {
+          throw apiError(
+            "provider_guardrail_blocked",
+            "Coach service is temporarily unavailable.",
+            503
+          );
+        }
+
+        if (error instanceof ProviderUsageCapReachedError) {
+          throw apiError(
+            "rate_limited",
+            "Coach service is temporarily unavailable.",
+            429,
+            error.retryAfterSeconds
+          );
+        }
+
+        throw error;
+      }
+    }
 
     stage = "service";
     if (isExternalCoachProvider(providerConfig.provider)) {
@@ -150,7 +227,9 @@ async function handleCoachRespond(
     if (error instanceof ApiError) {
       publicErrorType = error.code;
 
-      if (error.code === "rate_limited") {
+      if (providerUsageCapOutcome === "blocked") {
+        result = "provider_usage_cap_blocked";
+      } else if (error.code === "rate_limited") {
         result = "rate_limited";
       } else if (error.code === "provider_guardrail_blocked") {
         result = "provider_guardrail_blocked";
@@ -178,6 +257,31 @@ async function handleCoachRespond(
       ...(fallbackReasonId ? { fallbackReasonId } : {}),
       elapsedMs: Math.max(0, Date.now() - startedAt),
       providerInvocationAttempted,
+      ...(providerUsageCapOutcome
+        ? { providerUsageCapOutcome }
+        : {}),
+      ...(providerUsageCapLimit !== undefined
+        ? { providerUsageCapLimit }
+        : {}),
+      ...(providerUsageCapRemaining !== undefined
+        ? { providerUsageCapRemaining }
+        : {}),
+      ...(providerExecutionMetadata
+        ? {
+            providerLatencyMs:
+              providerExecutionMetadata.latencyMs,
+            ...(providerExecutionMetadata.usage
+              ? {
+                  providerInputTokens:
+                    providerExecutionMetadata.usage.inputTokens,
+                  providerOutputTokens:
+                    providerExecutionMetadata.usage.outputTokens,
+                  providerTotalTokens:
+                    providerExecutionMetadata.usage.totalTokens,
+                }
+              : {}),
+          }
+        : {}),
       ...(experimentId ? { experimentId } : {}),
       ...(experimentVersion ? { experimentVersion } : {}),
       ...(assignedProvider ? { assignedProvider } : {}),
@@ -215,6 +319,8 @@ async function handleCoachRespond(
   }
 }
 
+export { ProviderUsageCap };
+
 function handleHealth(): Response {
   return jsonResponse({
     ok: true,
@@ -226,7 +332,8 @@ function handleHealth(): Response {
 async function route(
   request: Request,
   env: Env,
-  coachService?: CoachService
+  coachService?: CoachService,
+  createProviderUsageCapPort?: ProviderUsageCapPortFactory
 ): Promise<Response> {
   if (request.method === "OPTIONS") {
     return emptyCorsResponse();
@@ -243,21 +350,32 @@ async function route(
   }
 
   if (url.pathname === "/v1/coach/respond") {
-    return handleCoachRespond(request, env, coachService);
+    return handleCoachRespond(
+      request,
+      env,
+      coachService,
+      createProviderUsageCapPort
+    );
   }
 
   throw apiError("not_found", "Route not found.", 404);
 }
 
 export function createWorker(
-  coachService?: CoachService
+  coachService?: CoachService,
+  createProviderUsageCapPort?: ProviderUsageCapPortFactory
 ): CoachWorker {
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const requestId = getSafeRequestIdHeader(request);
 
       try {
-        return await route(request, env, coachService);
+        return await route(
+          request,
+          env,
+          coachService,
+          createProviderUsageCapPort
+        );
       } catch (error) {
         if (error instanceof ApiError) {
           return errorResponse(error, requestId);
