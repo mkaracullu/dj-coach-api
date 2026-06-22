@@ -1009,25 +1009,56 @@ A real-iPhone test against an OpenAI-enabled backend requires explicit authoriza
 
 Android real-device QA must not be claimed because no Android device is currently available.
 
+## Operational Runbook
+
+The active project-level operational draft for Sprint 3B.6 Stage 5 is:
+
+```text
+docs/SPRINT_3B6_PRODUCTION_ACTIVATION_RUNBOOK.md
+```
+
+It lives in the DJ Lingo project/docs repository and defines the proposed:
+
+- production mock-baseline creation and rollback evidence;
+- production daily call ceiling;
+- provider-side budget verification;
+- monitoring and canary ownership;
+- warning and stop thresholds;
+- canary audience, attempt ceiling and observation window;
+- paid-call and real-user authorization gates.
+
+The runbook remains a draft until its placeholders and proposed thresholds are explicitly accepted. Repository configuration or deployment does not authorize a provider call.
+
 ## Requirements Before Real-User Activation
 
 Synthetic smoke and internal tester success are not sufficient for real-user activation.
 
-Before real-user OpenAI traffic, DJ Lingo must define or implement:
+Already implemented or accepted in source:
 
-* explicit operational ownership;
-* an accepted positive production daily call ceiling;
-* provider-side project budget controls verified outside this repository;
-* retained/queryable monitoring and alert thresholds for cap, failure, latency
-  and token telemetry;
-* deterministic request-limiter failure policy;
-* focused Session 2 and Session 7 screen-level remote integration tests;
-* accepted mobile production build/configuration delivery;
-* real-iPhone verification;
-* rollout thresholds;
-* stop thresholds;
-* rollback ownership;
-* explicit real-user activation authorization.
+- checked-in development/production environment separation;
+- independent request and provider limiter namespaces;
+- provider-neutral global daily provider-call cap;
+- SQLite-backed Cloudflare Durable Object adapter;
+- sanitized cap, latency and token telemetry;
+- deterministic production request-limiter failure policy;
+- controlled synthetic and real-iPhone Session 2/7 verification;
+- provider-neutral mobile contract and server-side keys.
+
+Still required before real-user OpenAI traffic:
+
+- direct production mock-baseline deployment applying the initial Durable Object migration;
+- a recorded production-only mock rollback version;
+- an accepted positive production daily call ceiling;
+- provider-side project budget/usage controls verified outside this repository;
+- retained/queryable monitoring and accepted warning/stop thresholds for cap, failure, latency and token telemetry;
+- named monitoring, incident and rollback owners;
+- focused Session 2 and Session 7 screen-level remote integration tests;
+- accepted production mobile configuration delivery;
+- a distribution-controlled canary audience, maximum provider attempts and observation window;
+- explicit authorization for any paid production synthetic request;
+- explicit authorization for any real-user activation.
+
+No external monitoring vendor, persistent telemetry store or automated alerting service has been selected. The initial monitoring choice must be accepted before canary traffic.
 
 ## Live Provider Evaluation
 
