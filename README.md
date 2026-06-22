@@ -22,7 +22,7 @@ Current runtime state:
 * deployed development environment value: `development`;
 * checked-in production provider mode: `mock`;
 * production Worker identity: `dj-coach-api-production`;
-* production Worker deployment: not yet created;
+* production Worker deployment: active mock baseline `1614368c-822c-4fd8-8609-143c5d3572ba` at 100% traffic;
 * real-user OpenAI traffic: inactive;
 * controlled OpenAI synthetic and real-iPhone verification: passed against the development Worker and rolled back;
 * Anthropic production traffic: inactive;
@@ -601,8 +601,8 @@ future external-provider version.
 
 Production must first be deployed in mock mode. The first accepted
 production mock version ID becomes the authoritative production rollback
-target. It must be recorded as `<PRODUCTION_MOCK_VERSION_ID>` in the operational
-record before any later OpenAI-configured production version is deployed.
+target. The accepted production mock rollback version is
+`1614368c-822c-4fd8-8609-143c5d3572ba`.
 
 ## Read-Only Runtime Preflight
 
@@ -739,7 +739,7 @@ Capture the deployed version ID and inspect it:
 
 ```bash
 npx wrangler versions view \
-  <PRODUCTION_MOCK_VERSION_ID> \
+  1614368c-822c-4fd8-8609-143c5d3572ba \
   --env production \
   --json
 ```
@@ -759,12 +759,12 @@ It must contain no provider or experiment secret and no OpenAI, Anthropic or
 experiment variable. `COACH_PROVIDER_DAILY_CALL_LIMIT` remains absent in mock
 mode.
 
-After deployment, record `<PRODUCTION_MOCK_VERSION_ID>` as the authoritative
+After deployment, record `1614368c-822c-4fd8-8609-143c5d3572ba` as the authoritative
 production rollback target and confirm:
 
 ```bash
 npx wrangler deployments status --env production --json
-npx wrangler versions view <PRODUCTION_MOCK_VERSION_ID> --env production --json
+npx wrangler versions view 1614368c-822c-4fd8-8609-143c5d3572ba --env production --json
 ```
 
 The production mock deployment does not authorize OpenAI, provider calls,
@@ -803,7 +803,7 @@ After the operation:
 * confirm only the secret name, not its value;
 * confirm no traffic was moved;
 * confirm the active production deployment remains
-  `<PRODUCTION_MOCK_VERSION_ID>`.
+  `1614368c-822c-4fd8-8609-143c5d3572ba`.
 
 Secret presence alone does not activate OpenAI while the active provider mode remains `mock`.
 It does not authorize OpenAI or a provider call.
@@ -936,17 +936,16 @@ A successful synthetic smoke does not authorize real-user traffic.
 Primary production rollback target:
 
 ```text
-<PRODUCTION_MOCK_VERSION_ID>
+1614368c-822c-4fd8-8609-143c5d3572ba
 ```
 
-The production target is recorded only after the first production
-mock deployment. Do not use the development rollback version for production.
+The production target was recorded after the first production mock deployment. Do not use the development rollback version for production.
 
 Planned production rollback command:
 
 ```bash
 npx wrangler rollback \
-  <PRODUCTION_MOCK_VERSION_ID> \
+  1614368c-822c-4fd8-8609-143c5d3572ba \
   --env production \
   --message "<ROLLBACK_REASON>" \
   --yes
@@ -1017,17 +1016,17 @@ The active project-level operational draft for Sprint 3B.6 Stage 5 is:
 docs/SPRINT_3B6_PRODUCTION_ACTIVATION_RUNBOOK.md
 ```
 
-It lives in the DJ Lingo project/docs repository and defines the proposed:
+It lives in the DJ Lingo project/docs repository and defines the accepted:
 
-- production mock-baseline creation and rollback evidence;
-- production daily call ceiling;
-- provider-side budget verification;
-- monitoring and canary ownership;
-- warning and stop thresholds;
-- canary audience, attempt ceiling and observation window;
+- production mock baseline and rollback evidence;
+- production daily call ceiling of 50;
+- OpenAI project budget target and notification thresholds;
+- owner-only 10-attempt canary;
+- monitoring and operational ownership;
+- latency, warning, stop and rollback thresholds;
 - paid-call and real-user authorization gates.
 
-The runbook remains a draft until its placeholders and proposed thresholds are explicitly accepted. Repository configuration or deployment does not authorize a provider call.
+The operational policy is accepted. Repository configuration, secret preparation or deployment still does not authorize a provider call.
 
 ## Requirements Before Real-User Activation
 
@@ -1044,21 +1043,26 @@ Already implemented or accepted in source:
 - controlled synthetic and real-iPhone Session 2/7 verification;
 - provider-neutral mobile contract and server-side keys.
 
+Accepted operational readiness:
+
+- production mock baseline and Durable Object migration completed;
+- production rollback version `1614368c-822c-4fd8-8609-143c5d3572ba`;
+- daily provider-call ceiling 50;
+- owner-only 10-attempt canary;
+- OpenAI $5/month budget target and notifications at 50%, 80% and 100%;
+- Cloudflare Free-plan monitoring with 3-day Workers Logs retention;
+- all operational roles assigned to Mete Han Karacullu;
+- accepted success, latency, stop and rollback conditions.
+
 Still required before real-user OpenAI traffic:
 
-- direct production mock-baseline deployment applying the initial Durable Object migration;
-- a recorded production-only mock rollback version;
-- an accepted positive production daily call ceiling;
-- provider-side project budget/usage controls verified outside this repository;
-- retained/queryable monitoring and accepted warning/stop thresholds for cap, failure, latency and token telemetry;
-- named monitoring, incident and rollback owners;
-- focused Session 2 and Session 7 screen-level remote integration tests;
-- accepted production mobile configuration delivery;
-- a distribution-controlled canary audience, maximum provider attempts and observation window;
-- explicit authorization for any paid production synthetic request;
-- explicit authorization for any real-user activation.
+- production OpenAI secret/version preparation while traffic remains on mock;
+- focused Session 2 and Session 7 screen-level production mobile integration tests;
+- explicit authorization and acceptance of a bounded paid production synthetic smoke;
+- explicit authorization of the owner-only real-user canary;
+- 24-hour post-canary evidence review before expansion.
 
-No external monitoring vendor, persistent telemetry store or automated alerting service has been selected. The initial monitoring choice must be accepted before canary traffic.
+No external monitoring vendor, persistent telemetry store or automated alerting service is selected for the first canary.
 
 ## Live Provider Evaluation
 
