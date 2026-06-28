@@ -314,6 +314,27 @@ describe("provider-neutral coach evaluation harness", () => {
     expect(report.qualityWarnings).toEqual([]);
   });
 
+  it("accepts natural Session 2 beginner wording with one concrete action", () => {
+    const fixture = requireFixture("session-2-tap-pulse-en");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Focus on steady timing, not speed. Tap with the pulse and keep the spacing even.",
+        {
+          nextActionLabel: "Tap steadily for 4 beats",
+          responseType: "lesson_explanation",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(true);
+    expect(report.hardGateFailures).toEqual([]);
+    expect(report.qualityGatePassed).toBe(true);
+    expect(report.qualityWarnings).toEqual([]);
+    expect(report.scores.english_quality).toBe(1);
+  });
+
   it("fails a bare Session 7 slow-count instruction", () => {
     const fixture = requireFixture("session-7-close");
     const report = evaluateCoachResponse(
@@ -650,6 +671,27 @@ describe("provider-neutral coach evaluation harness", () => {
     expect(report.hardGatePassed).toBe(true);
     expect(report.hardGateFailures).toEqual([]);
     expect(report.qualityGatePassed).toBe(true);
+    expect(report.responseType).toBe("attempt_feedback");
+  });
+
+  it("reports TrackB spacing as a quality warning, not a hard gate", () => {
+    const fixture = requireFixture("session-7-early");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "TrackB started about 180 ms early. Keep counting steadily.",
+        {
+          nextActionLabel: "Try the timing again",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(true);
+    expect(report.hardGateFailures).toEqual([]);
+    expect(report.qualityGatePassed).toBe(true);
+    expect(report.qualityWarnings).toContain("track_b_spacing");
   });
 
   it.each([

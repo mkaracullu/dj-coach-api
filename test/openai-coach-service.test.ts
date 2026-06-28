@@ -75,6 +75,12 @@ describe("OpenAI reference coach adapter", () => {
     expect(englishPrompt.input).toContain(
       "Compare taps with tempo or BPM only when relevant."
     );
+    expect(englishPrompt.input).toContain(
+      "Focus on steady timing, not speed."
+    );
+    expect(englishPrompt.input).not.toContain(
+      "consistent more than fast"
+    );
     expect(turkishPrompt.input).toContain(
       "connect ritim and vuruş to eşit veya düzenli aralıklar and zamanlama"
     );
@@ -133,6 +139,13 @@ describe("OpenAI reference coach adapter", () => {
     );
     expect(session7Prompt.input).toContain(
       "Do not repeat internal field identifiers"
+    );
+    expect(session7Prompt.input).toContain(
+      "Spell the second track exactly “Track B” with a space every time"
+    );
+    expect(session7Prompt.input).toContain("never write “TrackB”");
+    expect(session7Prompt.instructions).toContain(
+      "one clear coaching focus and one concrete next action"
     );
     expect(session7Prompt.input).not.toContain("landing=");
     expect(session7Prompt.input).not.toContain("offsetMs=");

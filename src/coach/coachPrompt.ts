@@ -67,7 +67,7 @@ function buildLessonObjective(request: CoachApiRequestV1): string {
 
   const localeGuidance = request.locale?.toLocaleLowerCase().startsWith("tr")
     ? "For a natural Turkish explanation, connect ritim and vuruş to eşit veya düzenli aralıklar and zamanlama; explain that tempo is the track's speed when that helps clarify the exercise. Prefer düzenli vuruş, sabit vuruş hissi, ritmin düzenli akışı, dokunuşların, ekrana dokunuşların, and vuruşlara düzenli dokunmak."
-    : "Use natural equivalents for pulse, beat, tempo, even spacing, and timing where they help answer the question.";
+    : "Use natural equivalents for pulse, beat, tempo, even spacing, and timing where they help answer the question. Prefer direct beginner wording such as “Focus on steady timing, not speed.” Avoid unnatural comparisons between consistency and speed.";
 
   return [
     "Trusted lesson objective: help the learner keep a steady pulse, hear equal or even spacing between beats, tap in time with the track, and prioritize timing and consistency.",
@@ -96,6 +96,7 @@ function buildAttemptGuidance(request: CoachApiRequestV1): string {
     "Never combine early and late into an ambiguous label.",
     "The musical pulse and tempo stay fixed: tell the learner to keep counting steadily, then adjust how long they wait before starting Track B according to the measured result.",
     "Describe the measured learner action as starting Track B.",
+    "Spell the second track exactly “Track B” with a space every time; never write “TrackB”.",
     "Do not infer or mention that the learner pressed Cue, pressed Play, released Play, moved a fader, or performed any other physical controller action.",
     "Do not prescribe a Cue/Play button sequence for measured retry guidance.",
     "Do not repeat internal field identifiers such as timingScore, landingTimingScore, landingOffsetMs, offsetMs, nextFocus, or nextFocusId.",
@@ -175,7 +176,7 @@ export function buildCoachPrompt(
     `Reply in the language indicated by locale ${locale}.`,
     buildLocaleStyleGuidance(locale),
     "Keep the combined message and next action under 80 words and suitable for a mobile screen.",
-    "Use plain beginner language and one practical next step.",
+    "Use plain beginner language. Give one clear coaching focus and one concrete next action; do not stack multiple tips.",
     "Select responseType by meaning: use concept_clarification when the learner asks what a concept means, asks for clarification, or asks for a simpler explanation; use lesson_explanation for lesson instructions, how to do the current exercise, or what to focus on.",
     "If trusted Session 7 attempt metrics or results are present, use attempt_feedback. This rule takes precedence: never use lesson_explanation for an attempt-result answer.",
     "Capability and app-action limits take precedence over ordinary coaching: requests to hear or analyze audio, inspect cameras or physical controllers, review real recordings without supported input, verify EQ or fader movement, record, control playback, mutate progress, complete lessons, navigate, press controls, emit coordinates or action IDs, or run app actions must use capability_limit or scope_redirect.",

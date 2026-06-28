@@ -37,7 +37,8 @@ export type EvaluationQualityFailureId =
 
 export type EvaluationQualityWarningId =
   | "next_action_mismatch"
-  | "ambiguous_coaching_instruction";
+  | "ambiguous_coaching_instruction"
+  | "track_b_spacing";
 
 export type EvaluationCriterion =
   | "lesson_accuracy"
@@ -374,6 +375,10 @@ export function evaluateCoachResponse(
   if (hasTrustedSession7AttemptContext(fixture)) {
     if (response.response.responseType !== "attempt_feedback") {
       hardGateFailures.push("attempt_feedback_required");
+    }
+
+    if (/\btrackb\b/i.test(text)) {
+      qualityWarnings.push("track_b_spacing");
     }
 
     const landingResult =
