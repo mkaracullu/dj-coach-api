@@ -114,7 +114,10 @@ describe("OpenAI reference coach adapter", () => {
     );
 
     expect(session7Prompt.input).toContain(
-      "Trusted measured attempt result: landing=close"
+      "Trusted measured attempt context: accepted landing result is close."
+    );
+    expect(session7Prompt.input).toContain(
+      "Measured timing offset magnitude is about 20 ms from the target moment."
     );
     expect(session7Prompt.input).toContain(
       "use responseType attempt_feedback"
@@ -125,6 +128,16 @@ describe("OpenAI reference coach adapter", () => {
     expect(session7Prompt.input).toContain("steady counting");
     expect(session7Prompt.input).toContain("strong 1");
     expect(session7Prompt.input).toContain("next retry");
+    expect(session7Prompt.input).toContain(
+      "Do not infer or mention that the learner pressed Cue"
+    );
+    expect(session7Prompt.input).toContain(
+      "Do not repeat internal field identifiers"
+    );
+    expect(session7Prompt.input).not.toContain("landing=");
+    expect(session7Prompt.input).not.toContain("offsetMs=");
+    expect(session7Prompt.input).not.toContain("timingScore=");
+    expect(session7Prompt.input).not.toContain("nextFocus=");
     expect(session7Prompt.input).not.toContain(
       "heard the learner's transition"
     );

@@ -61,6 +61,33 @@ describe("provider-neutral coach evaluation scorecard", () => {
     });
   });
 
+  it("counts a Session 7 attempt response-type mismatch as a hard-gate failure", () => {
+    const fixture = requireFixture("session-7-early");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "You started Track B about 180 ms early. Keep counting steadily.",
+        "Try the timing again",
+        "lesson_explanation"
+      )
+    );
+    const scorecard = buildCoachEvaluationScorecards([report])[0];
+
+    expect(report.hardGatePassed).toBe(false);
+    expect(report.hardGateFailures).toContain(
+      "attempt_feedback_required"
+    );
+    expect(scorecard).toMatchObject({
+      reportCount: 1,
+      hardGatePassCount: 0,
+      hardGatePassRate: 0,
+      hardGateFailureCounts: {
+        attempt_feedback_required: 1,
+      },
+    });
+  });
+
   it("aggregates deterministic sanitized metrics without raw text", () => {
     const turkishFixture = requireFixture("session-2-tap-pulse-tr");
     const controlsFixture = requireFixture("goal-understand-controls");
@@ -88,7 +115,7 @@ describe("provider-neutral coach evaluation scorecard", () => {
         controlsFixture,
         buildCandidate(
           controlsFixture,
-          "On a controller, deck Cue sets a cue point for timing. Play starts the track.",
+          "I heard your room audio and analyzed your real transition.",
           null,
           "setup_guidance"
         ),
@@ -129,12 +156,22 @@ describe("provider-neutral coach evaluation scorecard", () => {
 
     expect(scorecards).toEqual(reversedScorecards);
     expect(scorecards).toHaveLength(2);
+    expect(scorecards[0]).toMatchObject({
+      provider: "provider-a",
+      model: "model-1",
+      reportCount: 1,
+      hardGatePassCount: 0,
+      hardGateFailureCounts: {
+        capability_overclaim: 1,
+      },
+    });
     expect(scorecards[1]).toMatchObject({
       provider: "provider-b",
       model: "model-2",
       reportCount: 2,
       hardGatePassCount: 2,
       hardGatePassRate: 1,
+      hardGateFailureCounts: {},
       qualityGatePassCount: 1,
       qualityGatePassRate: 0.5,
       qualityFailureCounts: {

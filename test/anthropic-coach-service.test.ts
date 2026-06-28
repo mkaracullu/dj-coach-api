@@ -16,6 +16,9 @@ import { runLiveCoachEvaluation } from "./evaluation/runLiveCoachEvaluation";
 import { coachEvaluationFixtures } from "./fixtures/coachEvaluationFixtures";
 
 const fixture = coachEvaluationFixtures[0]!;
+const session7EarlyFixture = coachEvaluationFixtures.find(
+  (candidate) => candidate.id === "session-7-early"
+)!;
 
 function anthropicConfig() {
   return {
@@ -308,6 +311,48 @@ describe("Anthropic reference coach adapter", () => {
         semanticSafetyFailureCode: "app_state_mutation_claim",
       },
     ]);
+  });
+
+  it("uses sanitized semantic-safety fallback for unsafe Session 7 feedback", async () => {
+    const unsafeProviderMessage =
+      "Track B'yi yaklaşık 733 ms geç başlattın.";
+    const fallbackResults: CoachServiceFallbackResult[] = [];
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      providerResponse({
+        message: unsafeProviderMessage,
+        nextActionLabel: "Tekrar dene",
+        responseType: "attempt_feedback",
+        fallbackReasonId: null,
+      })
+    );
+    const service = createConfiguredCoachService(
+      {
+        COACH_PROVIDER: "anthropic",
+        ANTHROPIC_API_KEY: "test-anthropic-key-not-real",
+        ANTHROPIC_MODEL: "claude-reference-model",
+      },
+      fetchImplementation,
+      (result) => fallbackResults.push(result)
+    );
+    const response = await getCoachApiResponse(
+      session7EarlyFixture.request,
+      service
+    );
+
+    expect(response.response.responseType).toBe("attempt_feedback");
+    expect(JSON.stringify(response)).not.toContain(unsafeProviderMessage);
+    expect(fallbackResults).toEqual([
+      {
+        category: "semantic_safety_fallback",
+        providerErrorCategory: "invalid_structured_output",
+        providerHttpStatus: 200,
+        semanticSafetyFailureCode:
+          "session7_contradictory_timing_direction",
+      },
+    ]);
+    expect(JSON.stringify(fallbackResults)).not.toContain(
+      unsafeProviderMessage
+    );
   });
 
   it("keeps raw Anthropic failures out of evaluation reports", async () => {

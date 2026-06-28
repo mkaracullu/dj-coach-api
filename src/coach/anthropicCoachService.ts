@@ -260,7 +260,7 @@ export class AnthropicCoachService implements CoachService {
 
     const validatedResponse = validateProviderPayload(
       payload,
-      request.requestId,
+      request,
       providerResponse.status,
       (errorType, message, diagnostics) =>
         new AnthropicProviderError(errorType, message, diagnostics)

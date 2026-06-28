@@ -64,12 +64,22 @@ function createTrackingCoachService(): CoachService & {
     respond: vi.fn(async (request: CoachApiRequestV1) => ({
       contractVersion: 1,
       requestId: request.requestId,
-      response: {
-        message: "Safe scoped coach response.",
-        nextActionLabel: "Try the lesson step.",
-        responseType: "lesson_explanation",
-        fallbackReasonId: null,
-      },
+      response:
+        request.context.lesson?.sessionNumber === 7 &&
+        request.context.session7?.latestAttempt !== undefined
+          ? {
+              message:
+                "You started Track B a little early. Keep counting steadily and wait for the next strong 1.",
+              nextActionLabel: "Try the timing again.",
+              responseType: "attempt_feedback",
+              fallbackReasonId: null,
+            }
+          : {
+              message: "Safe scoped coach response.",
+              nextActionLabel: "Try the lesson step.",
+              responseType: "lesson_explanation",
+              fallbackReasonId: null,
+            },
     })),
   };
 }
@@ -1207,6 +1217,86 @@ describe("DJ Lingo Coach API", () => {
     expect(event).not.toHaveProperty("semanticSafetyFailureCode");
     expect(serializedLogs).not.toContain(rawMessage);
     expect(serializedLogs).not.toContain(rawStack);
+
+    fetchSpy.mockRestore();
+    consoleLog.mockRestore();
+  });
+
+  it("falls back for semantically unsafe Session 7 attempt feedback without public leakage", async () => {
+    const rawProviderOutput =
+      "You were a bit early/late by about 331 ms. RAW_SESSION7_PROVIDER_TEXT";
+    const session7Request = {
+      ...validRequest,
+      requestId: "coach_session_7_semantic_fallback",
+      question: {
+        source: "suggested",
+        suggestedQuestionId: "explain_timing_result",
+      },
+      context: {
+        ...validRequest.context,
+        lesson: {
+          sessionNumber: 7,
+          lessonId: "mini-attempt-review",
+          lessonPhase: "result",
+          activityType: "miniAttempt",
+        },
+        progress: {
+          completedSessionNumbers: [1, 2, 3, 4, 5, 6],
+        },
+        session7: {
+          latestAttempt: mobileShapedSession7AttemptFixture,
+          currentNextFocusId: "timing",
+        },
+      },
+    };
+    const consoleLog = vi
+      .spyOn(console, "log")
+      .mockImplementation(() => undefined);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      openAiProviderResponse({
+        message: rawProviderOutput,
+        nextActionLabel: "Try again.",
+        responseType: "attempt_feedback",
+        fallbackReasonId: null,
+      })
+    );
+    const response = await worker.fetch(
+      makeRequest(session7Request),
+      completeOpenAiEnv({
+        COACH_PROVIDER_RATE_LIMITER: {
+          async limit() {
+            return { success: true };
+          },
+        } as RateLimit,
+      })
+    );
+    const body = (await response.json()) as CoachApiSuccessResponseV1;
+    const serializedBody = JSON.stringify(body);
+    const serializedLogs = consoleLog.mock.calls
+      .map(([entry]) => String(entry))
+      .join("\n");
+    const event = JSON.parse(
+      String(consoleLog.mock.calls.at(-1)?.[0])
+    ) as Record<string, unknown>;
+
+    expect(response.status).toBe(200);
+    expect(body.response.responseType).toBe("attempt_feedback");
+    expect(body.response.message).toContain("early");
+    expect(serializedBody).not.toContain(rawProviderOutput);
+    expect(serializedBody).not.toContain("RAW_SESSION7_PROVIDER_TEXT");
+    expect(event).toMatchObject({
+      providerMode: "openai",
+      providerInvocationAttempted: true,
+      actualExternalProvider: "openai",
+      result: "semantic_safety_fallback",
+      fallbackCategory: "semantic_safety_fallback",
+      providerErrorCategory: "invalid_structured_output",
+      providerHttpStatus: 200,
+      semanticSafetyFailureCode:
+        "session7_ambiguous_timing_direction",
+    });
+    expect(serializedLogs).not.toContain(rawProviderOutput);
+    expect(serializedLogs).not.toContain("RAW_SESSION7_PROVIDER_TEXT");
 
     fetchSpy.mockRestore();
     consoleLog.mockRestore();

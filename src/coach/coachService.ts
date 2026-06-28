@@ -180,5 +180,5 @@ export async function getCoachApiResponse(
     candidate,
     request.requestId
   );
-  return validateCoachRuntimeSemanticSafety(validatedResponse);
+  return validateCoachRuntimeSemanticSafety(validatedResponse, request);
 }

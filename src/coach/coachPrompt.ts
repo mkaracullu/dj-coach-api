@@ -91,14 +91,30 @@ function buildAttemptGuidance(request: CoachApiRequestV1): string {
     return "No measured attempt result is available. Do not claim analysis.";
   }
 
-  const baseGuidance =
-    "Trusted attempt-feedback objective: use responseType attempt_feedback, explain only the supplied metrics, and give one beginner-safe next focus.";
+  const baseGuidance = [
+    "Trusted attempt-feedback objective: use responseType attempt_feedback, use the exact supplied landing result, explain only the supplied measured attempt context, and give one clear diagnosis plus one beginner-safe next focus.",
+    "Never combine early and late into an ambiguous label.",
+    "The musical pulse and tempo stay fixed: tell the learner to keep counting steadily, then adjust how long they wait before starting Track B according to the measured result.",
+    "Describe the measured learner action as starting Track B.",
+    "Do not infer or mention that the learner pressed Cue, pressed Play, released Play, moved a fader, or performed any other physical controller action.",
+    "Do not prescribe a Cue/Play button sequence for measured retry guidance.",
+    "Do not repeat internal field identifiers such as timingScore, landingTimingScore, landingOffsetMs, offsetMs, nextFocus, or nextFocusId.",
+    "Use controller-neutral retry guidance such as start Track B, wait for the next strong 1, and keep counting steadily.",
+  ].join(" ");
 
   if (attempt.landingResult === "close") {
     return `${baseGuidance} A close landing means the measured timing was near the intended moment. Connect the explanation to steady counting, landing on the strong 1, and what to focus on for the next retry.`;
   }
 
-  return `${baseGuidance} Explain the supplied ${attempt.landingResult} landing result and next focus without claiming to have heard audio or inspected hardware.`;
+  if (attempt.landingResult === "early") {
+    return `${baseGuidance} The accepted landing result is early, so say Track B started early. Tell the learner to keep counting steadily and wait a little longer before starting Track B on the next strong 1.`;
+  }
+
+  if (attempt.landingResult === "late") {
+    return `${baseGuidance} The accepted landing result is late, so say Track B started late. Tell the learner to keep counting steadily and start Track B a little sooner on the next strong 1.`;
+  }
+
+  return `${baseGuidance} The accepted landing result is great, so do not label it early or late. Reinforce steady counting and starting Track B on the strong 1.`;
 }
 
 function buildRoutingGuidance(request: CoachApiRequestV1): string {
@@ -188,7 +204,11 @@ export function buildCoachPrompt(
       ? `Controller context: status=${profile.controllerStatus}${profile.controllerBrand ? `, brand category=${profile.controllerBrand}` : ""}. Give generic advisory guidance only.`
       : "Controller context: unknown. Give generic advisory guidance only.",
     attempt
-      ? `Trusted measured attempt result: landing=${attempt.landingResult}, offsetMs=${attempt.landingOffsetMs}, timingScore=${attempt.landingTimingScore}, nextFocus=${attempt.nextFocusId}.`
+      ? [
+          `Trusted measured attempt context: accepted landing result is ${attempt.landingResult}.`,
+          `Measured timing offset magnitude is about ${Math.abs(attempt.landingOffsetMs)} ms${attempt.landingResult === "early" ? " before the target moment" : attempt.landingResult === "late" ? " after the target moment" : " from the target moment"}.`,
+          `Beginner retry focus: ${attempt.nextFocusId.replace(/_/g, " ")}.`,
+        ].join(" ")
       : null,
     buildAttemptGuidance(request),
   ]

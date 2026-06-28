@@ -61,7 +61,7 @@ function buildSession7Message(request: CoachApiRequestV1): CoachApiResponsePaylo
     case "late":
       return {
         message:
-          "Track B landed a little late. Prepare your finger earlier, then press Play right on the strong 1.",
+          "Track B landed a little late. Keep counting steadily and start Track B a little sooner on the next strong 1.",
         nextActionLabel: "Retry and prepare earlier.",
         responseType: "attempt_feedback",
         fallbackReasonId: null,

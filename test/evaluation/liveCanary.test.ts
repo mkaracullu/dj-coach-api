@@ -123,6 +123,14 @@ describe("live canary acceptance", () => {
       "hard_gate_failed",
     ],
     [
+      "Session 7 blocker finding",
+      {
+        hardGatePassed: false,
+        hardGateFailures: ["ambiguous_timing_direction"],
+      },
+      "hard_gate_failed",
+    ],
+    [
       "quality-gate failure",
       {
         qualityGatePassed: false,

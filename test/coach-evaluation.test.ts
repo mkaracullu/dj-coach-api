@@ -314,13 +314,13 @@ describe("provider-neutral coach evaluation harness", () => {
     expect(report.qualityWarnings).toEqual([]);
   });
 
-  it("warns for a bare Session 7 slow-down instruction", () => {
+  it("fails a bare Session 7 slow-count instruction", () => {
     const fixture = requireFixture("session-7-close");
     const report = evaluateCoachResponse(
       fixture,
       buildCandidate(
         fixture,
-        "Your timing was close to the strong 1. Slow down.",
+        "Your timing was close to the strong 1. Slow your count and wait for the next strong 1.",
         {
           nextActionLabel: "Try again",
           responseType: "attempt_feedback",
@@ -328,19 +328,19 @@ describe("provider-neutral coach evaluation harness", () => {
       )
     );
 
-    expect(report.qualityGatePassed).toBe(true);
-    expect(report.qualityWarnings).toEqual([
-      "ambiguous_coaching_instruction",
-    ]);
+    expect(report.hardGatePassed).toBe(false);
+    expect(report.hardGateFailures).toContain(
+      "counting_speed_change_instruction"
+    );
   });
 
-  it("accepts a Session 7 instruction that identifies what to slow", () => {
+  it("accepts a Session 7 instruction to count steadily and adjust waiting", () => {
     const fixture = requireFixture("session-7-close");
     const report = evaluateCoachResponse(
       fixture,
       buildCandidate(
         fixture,
-        "Your timing was close. Slow your count and wait for the next strong 1.",
+        "Your timing was close. Keep counting steadily and wait for the next strong 1.",
         {
           nextActionLabel: "Try the timing again",
           responseType: "attempt_feedback",
@@ -350,6 +350,364 @@ describe("provider-neutral coach evaluation harness", () => {
 
     expect(report.qualityGatePassed).toBe(true);
     expect(report.qualityWarnings).toEqual([]);
+  });
+
+  it.each([
+    [
+      "You were a bit early/late by about 331 ms.",
+      "ambiguous_timing_direction",
+    ],
+    [
+      "You landed late by about 733 ms.",
+      "timing_direction_contradiction",
+    ],
+    [
+      "A timingScore of 25 means the match needs more work.",
+      "internal_attempt_field_exposure",
+    ],
+    [
+      "A TimingScore of 25 means the match needs more work.",
+      "internal_attempt_field_exposure",
+    ],
+    [
+      "A timingscore of 25 means the match needs more work.",
+      "internal_attempt_field_exposure",
+    ],
+    [
+      "Count the beats more slowly and try again.",
+      "counting_speed_change_instruction",
+    ],
+    [
+      "Slow your count and wait for the 1.",
+      "counting_speed_change_instruction",
+    ],
+    [
+      "You pressed Play or Cue too soon.",
+      "unobserved_controller_action_claim",
+    ],
+    [
+      "Press Cue, then release Play right on the 1.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Zamanlaman erken/geç.",
+      "ambiguous_timing_direction",
+    ],
+    [
+      "Zamanlaman geç/erken.",
+      "ambiguous_timing_direction",
+    ],
+    [
+      "Zamanlaman erken veya geç.",
+      "ambiguous_timing_direction",
+    ],
+    [
+      "Zamanlaman geç veya erken.",
+      "ambiguous_timing_direction",
+    ],
+    [
+      "Track B'yi yaklaşık 733 ms geç başlattın.",
+      "timing_direction_contradiction",
+    ],
+    [
+      "Vuruşları daha yavaş say.",
+      "counting_speed_change_instruction",
+    ],
+    [
+      "Vuruşları daha hızlı say.",
+      "counting_speed_change_instruction",
+    ],
+    [
+      "Sayımı yavaşlat.",
+      "counting_speed_change_instruction",
+    ],
+    [
+      "Sayımı hızlandır.",
+      "counting_speed_change_instruction",
+    ],
+    [
+      "Play'e çok erken bastın.",
+      "unobserved_controller_action_claim",
+    ],
+    [
+      "Cue'ya bastın.",
+      "unobserved_controller_action_claim",
+    ],
+    [
+      "Fader'ı hareket ettirdin.",
+      "unobserved_controller_action_claim",
+    ],
+    [
+      "EQ'yu ayarladın.",
+      "unobserved_controller_action_claim",
+    ],
+    [
+      "Kontrolcüdeki başka bir düğmeyi çevirdin.",
+      "unobserved_controller_action_claim",
+    ],
+    [
+      "Cue'ya bas, sonra Play'e bas.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play tuşuna bas.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play düğmesine bas.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play butonuna bas.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play'e basmalısın.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play'e basın.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play'e basmalısınız.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play'e basıp devam et.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Play'e basarak devam et.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Cue'ya basıp Play'e bas.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Cue tuşuna bas, sonra Play tuşuna bas.",
+      "unsafe_controller_procedure",
+    ],
+    [
+      "Fader'ı hareket ettir.",
+      "unsafe_controller_procedure",
+    ],
+  ] as const)(
+    "hard-fails unsafe early Session 7 attempt feedback: %s",
+    (message, expectedFailure) => {
+      const fixture = requireFixture("session-7-early");
+      const report = evaluateCoachResponse(
+        fixture,
+        buildCandidate(fixture, message, {
+          nextActionLabel: "Try again",
+          responseType: "attempt_feedback",
+        })
+      );
+
+      expect(report.hardGatePassed).toBe(false);
+      expect(report.hardGateFailures).toContain(expectedFailure);
+    }
+  );
+
+  it("hard-fails late Session 7 attempt feedback that says early", () => {
+    const fixture = requireFixture("session-7-late");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "You started Track B early by about 733 ms.",
+        {
+          nextActionLabel: "Try again",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(false);
+    expect(report.hardGateFailures).toContain(
+      "timing_direction_contradiction"
+    );
+  });
+
+  it("hard-fails Turkish late Session 7 feedback that says early", () => {
+    const fixture = requireFixture("session-7-late");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Track B'yi yaklaşık 733 ms erken başlattın.",
+        {
+          nextActionLabel: "Tekrar dene",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(false);
+    expect(report.hardGateFailures).toContain(
+      "timing_direction_contradiction"
+    );
+  });
+
+  it.each(["close", "great"] as const)(
+    "hard-fails definitive Turkish direction for a %s Session 7 attempt",
+    (landingResult) => {
+      const closeFixture = requireFixture("session-7-close");
+      const latestAttempt =
+        closeFixture.request.context.session7?.latestAttempt;
+
+      if (latestAttempt === undefined) {
+        throw new Error("Session 7 fixture must include latestAttempt.");
+      }
+
+      const fixture: CoachEvaluationFixture = {
+        ...closeFixture,
+        id: `session-7-${landingResult}-direction-test`,
+        request: {
+          ...closeFixture.request,
+          context: {
+            ...closeFixture.request.context,
+            session7: {
+              ...closeFixture.request.context.session7,
+              latestAttempt: {
+                ...latestAttempt,
+                landingResult,
+                landingTimingScore: landingResult === "great" ? 50 : 40,
+              },
+            },
+          },
+        },
+      };
+      const report = evaluateCoachResponse(
+        fixture,
+        buildCandidate(fixture, "Zamanlaman kesinlikle erken.", {
+          nextActionLabel: "Tekrar dene",
+          responseType: "attempt_feedback",
+        })
+      );
+
+      expect(report.hardGatePassed).toBe(false);
+      expect(report.hardGateFailures).toContain(
+        "timing_direction_contradiction"
+      );
+    }
+  );
+
+  it("runs Session 7 text gates even when the response type is wrong", () => {
+    const fixture = requireFixture("session-7-early");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(fixture, "Zamanlaman erken/geç.", {
+        nextActionLabel: "Tekrar dene",
+        responseType: "lesson_explanation",
+      })
+    );
+
+    expect(report.hardGatePassed).toBe(false);
+    expect(report.hardGateFailures).toEqual(
+      expect.arrayContaining([
+        "attempt_feedback_required",
+        "ambiguous_timing_direction",
+      ])
+    );
+  });
+
+  it("hard-fails unsafe Session 7 next action text", () => {
+    const fixture = requireFixture("session-7-early");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "You started Track B about 733 ms early. Keep counting steadily.",
+        {
+          nextActionLabel: "Slow your count and try again.",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(false);
+    expect(report.hardGateFailures).toContain(
+      "counting_speed_change_instruction"
+    );
+  });
+
+  it("accepts safe early Session 7 attempt feedback", () => {
+    const fixture = requireFixture("session-7-early");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "You started Track B about 733 ms early. Keep counting at the same steady pace, wait a little longer, and start Track B on the next strong 1.",
+        {
+          nextActionLabel: "Try the timing again",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(true);
+    expect(report.hardGateFailures).toEqual([]);
+    expect(report.qualityGatePassed).toBe(true);
+  });
+
+  it.each([
+    "You were not late; you were early.",
+    "Do not count more slowly; keep counting steadily.",
+    "Geç kalmadın; yaklaşık 733 ms erken başladın.",
+    "Daha yavaş sayma; sayımı sabit tut.",
+    "Track B'yi yaklaşık 733 ms erken başlattın. Aynı tempoda saymaya devam et, biraz daha bekle ve sonraki güçlü 1'de Track B'yi başlat.",
+  ])("accepts safe negated or Turkish early feedback: %s", (message) => {
+    const fixture = requireFixture("session-7-early");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(fixture, message, {
+        nextActionLabel: "Tekrar dene",
+        responseType: "attempt_feedback",
+      })
+    );
+
+    expect(report.hardGatePassed).toBe(true);
+    expect(report.hardGateFailures).toEqual([]);
+  });
+
+  it("does not let a safe counting negation hide another unsafe evaluator instruction", () => {
+    const fixture = requireFixture("session-7-early");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "Do not count more slowly; count faster instead.",
+        {
+          nextActionLabel: "Try again",
+          responseType: "attempt_feedback",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(false);
+    expect(report.hardGateFailures).toContain(
+      "counting_speed_change_instruction"
+    );
+  });
+
+  it("allows generic controller setup outside measured Session 7 feedback", () => {
+    const fixture = requireFixture("goal-understand-controls");
+    const report = evaluateCoachResponse(
+      fixture,
+      buildCandidate(
+        fixture,
+        "On a controller, Cue sets or returns to a cue point and Play starts the track.",
+        {
+          nextActionLabel: "Practice Cue and Play timing.",
+          responseType: "setup_guidance",
+        }
+      )
+    );
+
+    expect(report.hardGatePassed).toBe(true);
+    expect(report.hardGateFailures).toEqual([]);
   });
 
   it("runs fixtures through the provider-neutral evaluation runner", async () => {

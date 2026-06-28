@@ -1,5 +1,6 @@
 import type {
   CoachEvaluationReport,
+  EvaluationHardGateId,
   EvaluationQualityFailureId,
   EvaluationQualityWarningId,
 } from "./coachEvaluator";
@@ -10,6 +11,7 @@ export type CoachEvaluationScorecard = {
   reportCount: number;
   hardGatePassCount: number;
   hardGatePassRate: number;
+  hardGateFailureCounts: Partial<Record<EvaluationHardGateId, number>>;
   qualityGatePassCount: number;
   qualityGatePassRate: number;
   averageScore: number;
@@ -82,12 +84,20 @@ export function buildCoachEvaluationScorecards(
         EvaluationQualityFailureId,
         number
       >();
+      const hardGateFailureCounts = new Map<
+        EvaluationHardGateId,
+        number
+      >();
       const qualityWarningCounts = new Map<
         EvaluationQualityWarningId,
         number
       >();
 
       for (const report of group) {
+        for (const failure of report.hardGateFailures) {
+          incrementCount(hardGateFailureCounts, failure);
+        }
+
         for (const failure of report.qualityFailures) {
           incrementCount(qualityFailureCounts, failure);
         }
@@ -103,6 +113,7 @@ export function buildCoachEvaluationScorecards(
         reportCount: group.length,
         hardGatePassCount,
         hardGatePassRate: hardGatePassCount / group.length,
+        hardGateFailureCounts: sortedCounts(hardGateFailureCounts),
         qualityGatePassCount,
         qualityGatePassRate: qualityGatePassCount / group.length,
         averageScore:

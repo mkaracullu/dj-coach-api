@@ -260,7 +260,7 @@ export class OpenAiCoachService implements CoachService {
 
     const validatedResponse = validateProviderPayload(
       payload,
-      request.requestId,
+      request,
       providerResponse.status,
       (errorType, message, diagnostics) =>
         new OpenAiProviderError(errorType, message, diagnostics)

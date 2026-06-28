@@ -2,6 +2,7 @@ import {
   coachApiContractVersion,
   coachApiLimits,
   coachFallbackReasonIdValues,
+  type CoachApiRequestV1,
   type CoachApiSuccessResponseV1,
   coachResponseTypeValues,
 } from "../contracts/CoachApiContract";
@@ -156,10 +157,11 @@ function inspectStructuredPayload(
 
 export function validateProviderPayload(
   payload: unknown,
-  requestId: string,
+  request: CoachApiRequestV1,
   providerHttpStatus: number,
   createError: ProviderErrorFactory
 ): CoachApiSuccessResponseV1 {
+  const { requestId } = request;
   let validatedResponse: CoachApiSuccessResponseV1;
 
   try {
@@ -192,7 +194,7 @@ export function validateProviderPayload(
   }
 
   try {
-    return validateCoachRuntimeSemanticSafety(validatedResponse);
+    return validateCoachRuntimeSemanticSafety(validatedResponse, request);
   } catch (error) {
     throw createError(
       "invalid_structured_output",
